@@ -172,6 +172,11 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
     case "GET_PROSPECTS":
       return await getProspects();
 
+    case "CHECK_PROSPECT_EXISTS":
+      const checkUrl = (message.payload as { profileUrl: string }).profileUrl;
+      const found = await findProspectByProfileUrl(checkUrl);
+      return { exists: !!found, prospect: found };
+
     case "ADD_PROSPECT":
       const added = await addProspect(message.payload as Prospect);
       await syncProspectToSheet(added).catch((err) =>

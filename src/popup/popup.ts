@@ -1,4 +1,4 @@
-import type { AppSettings, ExtensionMessage, Prospect } from "../shared/types";
+import type { AppSettings, DetectedProfile, ExtensionMessage, Prospect } from "../shared/types";
 import { STATUS_LABELS } from "../shared/types";
 
 function sendMessage<T>(message: ExtensionMessage): Promise<T> {
@@ -19,6 +19,21 @@ const googleConnectBtn = document.getElementById("google-connect") as HTMLButton
 const googleDisconnectBtn = document.getElementById("google-disconnect") as HTMLButtonElement;
 const sheetsStatus = document.getElementById("sheets-status")!;
 
+const currentProfileSection = document.getElementById("current-profile-section")!;
+const noProfileHint = document.getElementById("no-profile-hint")!;
+const currentProfilePhoto = document.getElementById("current-profile-photo") as HTMLImageElement;
+const currentProfilePhotoPlaceholder = document.getElementById(
+  "current-profile-photo-placeholder"
+)!;
+const currentProfileName = document.getElementById("current-profile-name")!;
+const currentProfileJob = document.getElementById("current-profile-job")!;
+const currentProfileLocation = document.getElementById("current-profile-location")!;
+const addCurrentProfileBtn = document.getElementById("add-current-profile") as HTMLButtonElement;
+const currentProfileHint = document.getElementById("current-profile-hint")!;
+
+let cachedProspects: Prospect[] = [];
+let currentDetectedProfile: DetectedProfile | null = null;
+
 function showStatus(text: string, isError = false): void {
   statusMessage.textContent = text;
   statusMessage.hidden = false;
@@ -28,7 +43,134 @@ function showStatus(text: string, isError = false): void {
   }, 4000);
 }
 
+function escapeHtml(text: string): string {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function createProspectAvatar(picture?: string): HTMLElement {
+  if (picture?.trim()) {
+    const img = document.createElement("img");
+    img.className = "prospect-photo";
+    img.alt = "";
+    img.src = picture;
+    img.onerror = () => {
+      const placeholder = document.createElement("div");
+      placeholder.className = "prospect-photo placeholder";
+      img.replaceWith(placeholder);
+    };
+    return img;
+  }
+
+  const placeholder = document.createElement("div");
+  placeholder.className = "prospect-photo placeholder";
+  return placeholder;
+}
+
+function setCurrentProfilePhoto(picture?: string): void {
+  currentProfilePhoto.onerror = () => {
+    currentProfilePhoto.hidden = true;
+    currentProfilePhoto.removeAttribute("src");
+    currentProfilePhotoPlaceholder.hidden = false;
+  };
+
+  if (picture?.trim()) {
+    currentProfilePhoto.src = picture;
+    currentProfilePhoto.hidden = false;
+    currentProfilePhotoPlaceholder.hidden = true;
+  } else {
+    currentProfilePhoto.hidden = true;
+    currentProfilePhoto.removeAttribute("src");
+    currentProfilePhotoPlaceholder.hidden = false;
+  }
+}
+
+function normalizeProfileUrl(url: string): string {
+  try {
+    const match = new URL(url).pathname.match(/\/in\/([^/]+)/);
+    if (match) return `https://www.linkedin.com/in/${match[1]}`;
+    return url.replace(/\/$/, "").split("?")[0];
+  } catch {
+    return url.replace(/\/$/, "").split("?")[0];
+  }
+}
+
+function isProfileInList(profileUrl: string): boolean {
+  const norm = normalizeProfileUrl(profileUrl);
+  return cachedProspects.some((p) => normalizeProfileUrl(p.profileUrl) === norm);
+}
+
+async function checkProfileInDb(profileUrl: string): Promise<boolean> {
+  const result = await sendMessage<{ exists: boolean }>({
+    type: "CHECK_PROSPECT_EXISTS",
+    payload: { profileUrl },
+  });
+  return result.exists;
+}
+
+async function fetchDetectedProfile(): Promise<DetectedProfile | null> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url?.includes("linkedin.com/in/")) return null;
+
+  try {
+    const profile = await chrome.tabs.sendMessage(tab.id, { type: "GET_CURRENT_PROFILE" });
+    if (!profile?.name || !profile?.profileUrl) return null;
+    const detected = profile as DetectedProfile;
+    detected.alreadyInDb = await checkProfileInDb(detected.profileUrl);
+    return detected;
+  } catch {
+    return null;
+  }
+}
+
+function renderDetectedProfile(profile: DetectedProfile | null): void {
+  currentDetectedProfile = profile;
+
+  if (!profile) {
+    currentProfileSection.hidden = true;
+    noProfileHint.hidden = false;
+    return;
+  }
+
+  noProfileHint.hidden = true;
+  currentProfileSection.hidden = false;
+
+  currentProfileName.textContent = profile.name;
+  currentProfileJob.textContent = profile.jobTitle?.trim() || "Poste non détecté";
+  currentProfileJob.style.color = profile.jobTitle ? "#444" : "#999";
+
+  if (profile.location?.trim()) {
+    currentProfileLocation.textContent = profile.location.trim();
+    currentProfileLocation.hidden = false;
+  } else {
+    currentProfileLocation.textContent = "";
+    currentProfileLocation.hidden = true;
+  }
+
+  setCurrentProfilePhoto(profile.profilePicture);
+
+  const inList = profile.alreadyInDb ?? isProfileInList(profile.profileUrl);
+  addCurrentProfileBtn.disabled = inList;
+  addCurrentProfileBtn.textContent = inList ? "Déjà dans la liste" : "Ajouter à la liste";
+
+  if (inList) {
+    currentProfileHint.textContent = "Ce prospect est déjà enregistré dans la base.";
+    currentProfileHint.classList.add("in-list");
+    currentProfileHint.hidden = false;
+  } else {
+    currentProfileHint.hidden = true;
+    currentProfileHint.classList.remove("in-list");
+  }
+}
+
+async function refreshDetectedProfile(): Promise<void> {
+  const profile = await fetchDetectedProfile();
+  renderDetectedProfile(profile);
+}
+
 function renderProspects(prospects: Prospect[]): void {
+  cachedProspects = prospects;
   prospectCount.textContent = String(prospects.length);
   prospectList.innerHTML = "";
 
@@ -39,19 +181,23 @@ function renderProspects(prospects: Prospect[]): void {
   for (const prospect of sorted.slice(0, 20)) {
     const li = document.createElement("li");
     li.className = "prospect-item";
-    li.innerHTML = `
+
+    const body = document.createElement("div");
+    body.className = "prospect-body";
+    body.innerHTML = `
       <div class="prospect-name">${escapeHtml(prospect.name)}</div>
       <div class="prospect-meta">${escapeHtml(prospect.jobTitle ?? "")}</div>
       <span class="prospect-status">${escapeHtml(STATUS_LABELS[prospect.status] ?? prospect.status)}</span>
     `;
+
+    li.appendChild(createProspectAvatar(prospect.profilePicture));
+    li.appendChild(body);
     prospectList.appendChild(li);
   }
-}
 
-function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+  if (currentDetectedProfile) {
+    renderDetectedProfile(currentDetectedProfile);
+  }
 }
 
 function updateSheetsUI(settings: AppSettings): void {
@@ -85,6 +231,48 @@ async function loadProspects(): Promise<void> {
   const prospects = await sendMessage<Prospect[]>({ type: "GET_PROSPECTS" });
   renderProspects(prospects);
 }
+
+addCurrentProfileBtn.addEventListener("click", async () => {
+  if (!currentDetectedProfile) return;
+
+  const inDb =
+    (await checkProfileInDb(currentDetectedProfile.profileUrl)) ||
+    isProfileInList(currentDetectedProfile.profileUrl);
+
+  if (inDb) {
+    showStatus("Ce prospect est déjà dans la liste", true);
+    renderDetectedProfile({ ...currentDetectedProfile, alreadyInDb: true });
+    return;
+  }
+
+  addCurrentProfileBtn.disabled = true;
+  try {
+    const now = new Date().toISOString();
+    const slug =
+      currentDetectedProfile.profileUrl.split("/in/")[1]?.replace(/\/$/, "") ??
+      crypto.randomUUID();
+
+    const prospect = await sendMessage<Prospect>({
+      type: "ADD_PROSPECT",
+      payload: {
+        id: slug,
+        name: currentDetectedProfile.name,
+        profileUrl: currentDetectedProfile.profileUrl,
+        profilePicture: currentDetectedProfile.profilePicture,
+        jobTitle: currentDetectedProfile.jobTitle,
+        status: "invitation_envoyee",
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    showStatus(`${prospect.name} ajouté à la liste`);
+    await loadProspects();
+  } catch (err) {
+    showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
+    addCurrentProfileBtn.disabled = false;
+  }
+});
 
 toggle.addEventListener("change", async () => {
   const enabled = toggle.checked;
@@ -194,3 +382,10 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
 
 loadSettings();
 loadProspects();
+refreshDetectedProfile();
+
+const profileRefreshTimer = setInterval(() => {
+  refreshDetectedProfile().catch(() => {});
+}, 2000);
+
+window.addEventListener("unload", () => clearInterval(profileRefreshTimer));

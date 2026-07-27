@@ -63,7 +63,18 @@ export type MessageType =
   | "SHOW_NOTIFICATION"
   | "SAVE_PENDING_INVITE"
   | "GET_PENDING_INVITE"
-  | "CLEAR_PENDING_INVITE";
+  | "CLEAR_PENDING_INVITE"
+  | "GET_CURRENT_PROFILE"
+  | "CHECK_PROSPECT_EXISTS";
+
+export interface DetectedProfile {
+  name: string;
+  profileUrl: string;
+  profilePicture?: string;
+  jobTitle?: string;
+  location?: string;
+  alreadyInDb?: boolean;
+}
 
 export interface PendingInvite {
   vanityName: string;

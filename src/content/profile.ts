@@ -551,8 +551,27 @@ function installPageBridgeListeners(): void {
   }) as EventListener);
 }
 
+function installProfileMessageListener(): void {
+  if (profileMessageListenerAttached) return;
+  profileMessageListenerAttached = true;
+
+  chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+    if (message.type !== "GET_CURRENT_PROFILE") return;
+
+    const data = extractProfileData();
+    sendResponse(data);
+    return true;
+  });
+}
+
+let profileMessageListenerAttached = false;
+
 export function initProfileTracking(): void {
   if (profileTrackingStopped) return;
+
+  if (window === window.top) {
+    installProfileMessageListener();
+  }
 
   startContextWatch();
   installPageBridgeListeners();

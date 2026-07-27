@@ -16,41 +16,67 @@
       </label>
     </header>
 
-    <section class="actions">
-      <button type="button" id="sync-connections" class="btn btn-secondary">
-        Sync connexions
-      </button>
-      <button type="button" id="export-excel" class="btn btn-primary">
-        Export Excel
-      </button>
-    </section>
-
-    <section class="sheets">
-      <h2>Google Sheet</h2>
-      <label for="spreadsheet-id">URL ou ID du sheet</label>
-      <input type="text" id="spreadsheet-id" placeholder="https://docs.google.com/spreadsheets/d/..." />
-
-      <label for="sheet-tab-name">Nom de l'onglet</label>
-      <input type="text" id="sheet-tab-name" value="Feuille 1" placeholder="Feuille 1 ou Sheet1" />
-
-      <div class="sheets-actions">
-        <button type="button" id="google-connect" class="btn btn-primary">Connecter Google</button>
-        <button type="button" id="google-disconnect" class="btn btn-secondary" hidden>
-          Déconnecter
+    <div class="popup-content">
+      <section id="current-profile-section" class="current-profile" hidden>
+        <h2>Profil détecté</h2>
+        <div class="current-profile-card">
+          <img id="current-profile-photo" class="current-profile-photo" alt="" hidden />
+          <div id="current-profile-photo-placeholder" class="current-profile-photo placeholder" hidden></div>
+          <div class="current-profile-info">
+            <div id="current-profile-name" class="current-profile-name"></div>
+            <div id="current-profile-job" class="current-profile-job"></div>
+            <div id="current-profile-location" class="current-profile-location"></div>
+          </div>
+        </div>
+        <button type="button" id="add-current-profile" class="btn btn-primary btn-block">
+          Ajouter à la liste
         </button>
-      </div>
-      <p id="sheets-status" class="sheets-status">Non connecté</p>
-    </section>
+        <p id="current-profile-hint" class="current-profile-hint" hidden></p>
+      </section>
 
-    <section class="settings">
-      <label for="follow-up-days">Relance après (jours)</label>
-      <input type="number" id="follow-up-days" min="1" max="30" value="3" />
-    </section>
+      <p id="no-profile-hint" class="no-profile-hint" hidden>
+        Ouvre un profil LinkedIn (<code>/in/nom</code>) pour voir le prospect détecté.
+      </p>
 
-    <section class="prospects">
-      <h2>Prospects (<span id="prospect-count">0</span>)</h2>
-      <ul id="prospect-list"></ul>
-    </section>
+      <section class="actions">
+        <button type="button" id="sync-connections" class="btn btn-secondary">
+          Sync connexions
+        </button>
+        <button type="button" id="export-excel" class="btn btn-primary">
+          Export Excel
+        </button>
+      </section>
+
+      <section class="prospects">
+        <h2>Prospects (<span id="prospect-count">0</span>)</h2>
+        <ul id="prospect-list"></ul>
+      </section>
+
+      <details class="popup-settings">
+        <summary>Paramètres & Google Sheet</summary>
+        <section class="sheets">
+          <h2>Google Sheet</h2>
+          <label for="spreadsheet-id">URL ou ID du sheet</label>
+          <input type="text" id="spreadsheet-id" placeholder="https://docs.google.com/spreadsheets/d/..." />
+
+          <label for="sheet-tab-name">Nom de l'onglet</label>
+          <input type="text" id="sheet-tab-name" value="Feuille 1" placeholder="Feuille 1 ou Sheet1" />
+
+          <div class="sheets-actions">
+            <button type="button" id="google-connect" class="btn btn-primary">Connecter Google</button>
+            <button type="button" id="google-disconnect" class="btn btn-secondary" hidden>
+              Déconnecter
+            </button>
+          </div>
+          <p id="sheets-status" class="sheets-status">Non connecté</p>
+        </section>
+
+        <section class="settings">
+          <label for="follow-up-days">Relance après (jours)</label>
+          <input type="number" id="follow-up-days" min="1" max="30" value="3" />
+        </section>
+      </details>
+    </div>
 
     <p id="status-message" class="status-message" hidden></p>
 

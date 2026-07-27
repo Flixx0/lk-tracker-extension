@@ -8,7 +8,7 @@ html {
 
 body {
   width: 360px;
-  max-height: 580px;
+  height: 580px;
   margin: 0;
   padding: 16px;
   overflow: hidden;
@@ -24,8 +24,16 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   flex-shrink: 0;
+}
+
+.popup-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 h1 {
@@ -84,10 +92,92 @@ h2 {
   font-size: 12px;
 }
 
+.current-profile {
+  margin-bottom: 10px;
+  padding: 12px;
+  background: white;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.current-profile-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.current-profile-photo {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.current-profile-photo.placeholder {
+  background: #e8e8e8;
+}
+
+.current-profile-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.current-profile-name {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.3;
+  margin-bottom: 4px;
+}
+
+.current-profile-job {
+  font-size: 12px;
+  color: #444;
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+
+.current-profile-location {
+  font-size: 11px;
+  color: #666;
+  line-height: 1.3;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.current-profile-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #0a66c2;
+  text-align: center;
+}
+
+.current-profile-hint.in-list {
+  color: #666;
+}
+
+.no-profile-hint {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #666;
+  background: #f0f0f0;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.no-profile-hint code {
+  font-size: 11px;
+}
+
 .actions {
   display: flex;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   flex-shrink: 0;
 }
 
@@ -119,13 +209,111 @@ h2 {
   background: #d4d4d4;
 }
 
+.prospects {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.prospects h2 {
+  flex-shrink: 0;
+}
+
+#prospect-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.prospect-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  background: white;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.prospect-item:last-child {
+  margin-bottom: 0;
+}
+
+.prospect-photo {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #e8e8e8;
+}
+
+.prospect-photo.placeholder {
+  display: block;
+}
+
+.prospect-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.prospect-name {
+  font-weight: 600;
+  margin-bottom: 2px;
+  line-height: 1.3;
+}
+
+.prospect-meta {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.35;
+}
+
+.prospect-status {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #e8f4fc;
+  color: #0a66c2;
+}
+
+.popup-settings {
+  flex-shrink: 0;
+  border-top: 1px solid #e8e8e8;
+  padding-top: 4px;
+}
+
+.popup-settings summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+  padding: 6px 0;
+  user-select: none;
+}
+
+.popup-settings summary::-webkit-details-marker {
+  margin-right: 6px;
+}
+
 .settings {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
   font-size: 13px;
-  flex-shrink: 0;
 }
 
 .settings input {
@@ -136,12 +324,11 @@ h2 {
 }
 
 .sheets {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   padding: 12px;
   background: white;
   border: 1px solid #e8e8e8;
   border-radius: 8px;
-  flex-shrink: 0;
 }
 
 .sheets label {
@@ -177,63 +364,6 @@ h2 {
 }
 
 .sheets-status.connected {
-  color: #0a66c2;
-}
-
-.prospects {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 0;
-}
-
-.prospects h2 {
-  flex-shrink: 0;
-}
-
-#prospect-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-.prospect-item {
-  padding: 10px;
-  background: white;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  margin-bottom: 8px;
-}
-
-.prospect-item:last-child {
-  margin-bottom: 0;
-}
-
-.prospect-name {
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.prospect-meta {
-  font-size: 12px;
-  color: #666;
-}
-
-.prospect-status {
-  display: inline-block;
-  margin-top: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  background: #e8f4fc;
   color: #0a66c2;
 }
 

@@ -646,6 +646,100 @@ export function extractJobTitle(root: ParentNode = document): string {
   return "";
 }
 
+function isValidProfilePhotoUrl(url: string): boolean {
+  if (!url || url.startsWith("data:")) return false;
+  if (url.includes("ghost")) return false;
+  return url.includes("profile-displayphoto") || url.includes("licdn.com/dms/image");
+}
+
+function resolveBestImageUrl(img: HTMLImageElement): string | undefined {
+  const srcset = img.getAttribute("srcset");
+  if (srcset) {
+    let bestUrl = "";
+    let bestW = 0;
+    for (const entry of srcset.split(",")) {
+      const parts = entry.trim().split(/\s+/);
+      const url = parts[0];
+      const w = parts[1]?.endsWith("w") ? parseInt(parts[1], 10) : 0;
+      if (url && w >= bestW) {
+        bestW = w;
+        bestUrl = url;
+      }
+    }
+    if (bestUrl) return bestUrl;
+  }
+  return img.currentSrc || img.src || img.getAttribute("src") || undefined;
+}
+
+function queryProfilePhotoImg(root: ParentNode = document): HTMLImageElement | null {
+  const selectors = [
+    '[componentkey="topcard-logo-image-referencekey"] img',
+    '[componentkey*="topcard-logo-image"] img',
+    '[aria-label="Photo de profil"] img',
+    '[aria-label*="Photo de profil"] img',
+    '[aria-label="Profile photo"] img',
+    '[aria-label*="Profile photo"] img',
+  ];
+
+  for (const sel of selectors) {
+    const img = root.querySelector<HTMLImageElement>(sel);
+    if (img) return img;
+  }
+
+  const photoContainer = root.querySelector<HTMLElement>(
+    '[aria-label="Photo de profil"], [aria-label*="Photo de profil"], [aria-label="Profile photo"], [aria-label*="Profile photo"]'
+  );
+  return photoContainer?.querySelector<HTMLImageElement>("img") ?? null;
+}
+
+/** Photo du profil visité — pas l'avatar du header / nav */
+function extractProfilePicture(nameEl: HTMLElement | null): string | undefined {
+  const topCardImg = queryProfilePhotoImg();
+  if (topCardImg) {
+    const url = resolveBestImageUrl(topCardImg);
+    if (url && isValidProfilePhotoUrl(url)) return url;
+  }
+
+  const og = document.querySelector('meta[property="og:image"]')?.getAttribute("content");
+  if (og?.trim() && isValidProfilePhotoUrl(og)) return og.trim();
+
+  if (nameEl) {
+    let container: HTMLElement | null = nameEl;
+    for (let depth = 0; depth < 14 && container; depth++) {
+      const scopedImg = queryProfilePhotoImg(container);
+      if (scopedImg) {
+        const url = resolveBestImageUrl(scopedImg);
+        if (url && isValidProfilePhotoUrl(url)) return url;
+      }
+
+      const imgs = Array.from(container.querySelectorAll<HTMLImageElement>("img"));
+      const candidates = imgs.filter((img) => {
+        const src = img.currentSrc || img.src || img.getAttribute("src") || "";
+        if (!isValidProfilePhotoUrl(src)) return false;
+        if (img.closest("header, nav, [role='navigation'], [data-test-global-nav]")) return false;
+        return src.includes("profile-displayphoto");
+      });
+
+      if (candidates.length > 0) {
+        const best = candidates.sort(
+          (a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight
+        )[0];
+        const url = resolveBestImageUrl(best);
+        if (url) return url;
+      }
+
+      if (container.parentElement?.tagName === "MAIN" && depth > 2) break;
+      container = container.parentElement;
+    }
+  }
+
+  const legacy =
+    document.querySelector<HTMLImageElement>("main img.pv-top-card-profile-picture__image") ??
+    document.querySelector<HTMLImageElement>("main button.pv-top-card-profile-picture img");
+  const legacyUrl = legacy ? resolveBestImageUrl(legacy) : undefined;
+  return legacyUrl && isValidProfilePhotoUrl(legacyUrl) ? legacyUrl : undefined;
+}
+
 export function extractProfileData(): {
   name: string;
   profileUrl: string;
@@ -685,17 +779,7 @@ export function extractProfileData(): {
 
   const jobTitle = extractJobTitle(document) || extractJobTitleFromProfileCard(document, name);
   const location = extractLocationFromProfileCard(document);
-
-  const imgEl =
-    document.querySelector("main img.pv-top-card-profile-picture__image") ??
-    document.querySelector("main button.pv-top-card-profile-picture img") ??
-    document.querySelector("img[src*='profile-displayphoto']") ??
-    document.querySelector('meta[property="og:image"]');
-
-  const profilePicture =
-    imgEl instanceof HTMLMetaElement
-      ? imgEl.getAttribute("content")
-      : (imgEl?.getAttribute("src") ?? undefined);
+  const profilePicture = extractProfilePicture(nameEl);
 
   return {
     name,
