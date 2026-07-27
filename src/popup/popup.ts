@@ -31,6 +31,21 @@ const currentProfileLocation = document.getElementById("current-profile-location
 const addCurrentProfileBtn = document.getElementById("add-current-profile") as HTMLButtonElement;
 const currentProfileHint = document.getElementById("current-profile-hint")!;
 
+const openPanelWindowBtn = document.getElementById("open-panel-window") as HTMLButtonElement;
+const openSidePanelBtn = document.getElementById("open-side-panel") as HTMLButtonElement;
+
+const isWindowMode = new URLSearchParams(location.search).get("mode") === "window";
+if (isWindowMode) {
+  document.body.classList.add("window-mode");
+  openPanelWindowBtn.hidden = true;
+  openSidePanelBtn.hidden = true;
+} else {
+  document.body.classList.add("panel-mode");
+  if (chrome.sidePanel?.open) {
+    openSidePanelBtn.hidden = false;
+  }
+}
+
 let cachedProspects: Prospect[] = [];
 let currentDetectedProfile: DetectedProfile | null = null;
 
@@ -109,8 +124,20 @@ async function checkProfileInDb(profileUrl: string): Promise<boolean> {
   return result.exists;
 }
 
+async function getLinkedInProfileTab(): Promise<chrome.tabs.Tab | null> {
+  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (activeTab?.id && activeTab.url?.includes("linkedin.com/in/")) {
+    return activeTab;
+  }
+
+  const profileTabs = await chrome.tabs.query({ url: "https://www.linkedin.com/in/*" });
+  if (profileTabs.length === 0) return null;
+
+  return profileTabs.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
+}
+
 async function fetchDetectedProfile(): Promise<DetectedProfile | null> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await getLinkedInProfileTab();
   if (!tab?.id || !tab.url?.includes("linkedin.com/in/")) return null;
 
   try {
@@ -383,6 +410,56 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
 loadSettings();
 loadProspects();
 refreshDetectedProfile();
+
+openPanelWindowBtn.addEventListener("click", async () => {
+  openPanelWindowBtn.disabled = true;
+  try {
+    // Ouvre la fenêtre depuis le popup (plus fiable qu'via le SW, surtout sur Arc)
+    const KEY = "lkPanelWindowId";
+    const stored = await chrome.storage.local.get(KEY);
+    const existingId = stored[KEY] as number | undefined;
+
+    if (existingId) {
+      try {
+        await chrome.windows.update(existingId, {
+          focused: true,
+          width: 420,
+          height: 720,
+          state: "normal",
+        });
+        window.close();
+        return;
+      } catch {
+        await chrome.storage.local.remove(KEY);
+      }
+    }
+
+    const win = await chrome.windows.create({
+      url: chrome.runtime.getURL("popup.html?mode=window"),
+      type: "normal",
+      width: 420,
+      height: 720,
+      focused: true,
+    });
+
+    if (win.id) {
+      await chrome.storage.local.set({ [KEY]: win.id });
+      await chrome.windows.update(win.id, { width: 420, height: 720, state: "normal" });
+    }
+    window.close();
+  } catch (err) {
+    showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
+    openPanelWindowBtn.disabled = false;
+  }
+});
+
+openSidePanelBtn.addEventListener("click", async () => {
+  try {
+    await sendMessage({ type: "OPEN_SIDE_PANEL" });
+  } catch (err) {
+    showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+});
 
 const profileRefreshTimer = setInterval(() => {
   refreshDetectedProfile().catch(() => {});

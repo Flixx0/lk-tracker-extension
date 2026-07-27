@@ -21,6 +21,69 @@ import {
 } from "../shared/sheets";
 
 const PENDING_INVITE_KEY = "pendingInvite";
+const PANEL_WINDOW_ID_KEY = "lkPanelWindowId";
+
+async function openPanelWindow(): Promise<{ ok: true; windowId: number }> {
+  const stored = await chrome.storage.local.get(PANEL_WINDOW_ID_KEY);
+  const existingId = stored[PANEL_WINDOW_ID_KEY] as number | undefined;
+
+  if (existingId) {
+    try {
+      await chrome.windows.get(existingId);
+      await chrome.windows.update(existingId, {
+        focused: true,
+        width: 420,
+        height: 720,
+        state: "normal",
+      });
+      return { ok: true, windowId: existingId };
+    } catch {
+      await chrome.storage.local.remove(PANEL_WINDOW_ID_KEY);
+    }
+  }
+
+  const win = await chrome.windows.create({
+    url: chrome.runtime.getURL("popup.html?mode=window"),
+    type: "normal",
+    width: 420,
+    height: 720,
+    focused: true,
+  });
+
+  if (!win.id) throw new Error("Impossible de créer la fenêtre");
+
+  await chrome.storage.local.set({ [PANEL_WINDOW_ID_KEY]: win.id });
+  await chrome.windows.update(win.id, {
+    width: 420,
+    height: 720,
+    state: "normal",
+  });
+  return { ok: true, windowId: win.id };
+}
+
+async function openSidePanel(tab: chrome.tabs.Tab): Promise<boolean> {
+  if (!tab.windowId || !chrome.sidePanel?.open) return false;
+
+  try {
+    await chrome.sidePanel.setOptions({
+      path: "popup.html",
+      enabled: true,
+    });
+    await chrome.sidePanel.open({ windowId: tab.windowId });
+    return true;
+  } catch (err) {
+    console.warn("[LK Tracker] Side panel open failed:", err);
+    return false;
+  }
+}
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  chrome.storage.local.get(PANEL_WINDOW_ID_KEY).then((stored) => {
+    if (stored[PANEL_WINDOW_ID_KEY] === windowId) {
+      chrome.storage.local.remove(PANEL_WINDOW_ID_KEY);
+    }
+  });
+});
 
 let lastNotificationAt = 0;
 let lastNotificationKey = "";
@@ -176,6 +239,17 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
       const checkUrl = (message.payload as { profileUrl: string }).profileUrl;
       const found = await findProspectByProfileUrl(checkUrl);
       return { exists: !!found, prospect: found };
+
+    case "OPEN_PANEL_WINDOW":
+      await openPanelWindow();
+      return { ok: true };
+
+    case "OPEN_SIDE_PANEL":
+      const [sideTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!sideTab) return { ok: false };
+      const opened = await openSidePanel(sideTab);
+      if (!opened) await openPanelWindow();
+      return { ok: opened };
 
     case "ADD_PROSPECT":
       const added = await addProspect(message.payload as Prospect);

@@ -3,7 +3,7 @@
   "name": "LK Tracker",
   "version": "0.1.0",
   "description": "Tracker de prospects LinkedIn",
-  "permissions": ["storage", "activeTab", "tabs", "downloads", "identity", "notifications"],
+  "permissions": ["storage", "activeTab", "tabs", "downloads", "identity", "notifications", "sidePanel"],
   "host_permissions": [
     "https://www.linkedin.com/*",
     "https://www.googleapis.com/*"
@@ -13,8 +13,9 @@
     "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
   },
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "LK Tracker"
+    "default_title": "LK Tracker",
+    "default_icon": "icon48.png",
+    "default_popup": "popup.html"
   },
   "icons": {
     "48": "icon48.png",

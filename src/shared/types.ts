@@ -65,7 +65,9 @@ export type MessageType =
   | "GET_PENDING_INVITE"
   | "CLEAR_PENDING_INVITE"
   | "GET_CURRENT_PROFILE"
-  | "CHECK_PROSPECT_EXISTS";
+  | "CHECK_PROSPECT_EXISTS"
+  | "OPEN_PANEL_WINDOW"
+  | "OPEN_SIDE_PANEL";
 
 export interface DetectedProfile {
   name: string;

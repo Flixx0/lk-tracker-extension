@@ -4,11 +4,15 @@
 
 html {
   overflow: hidden;
+  height: 100%;
+  min-height: 100%;
 }
 
 body {
-  width: 360px;
-  height: 580px;
+  width: 100%;
+  min-width: 320px;
+  min-height: 400px;
+  height: 100%;
   margin: 0;
   padding: 16px;
   overflow: hidden;
@@ -20,12 +24,47 @@ body {
   background: #fafafa;
 }
 
+body.window-mode {
+  width: 100%;
+  min-width: 360px;
+  min-height: 100vh;
+  height: 100vh;
+  max-height: none;
+}
+
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
   flex-shrink: 0;
+  gap: 8px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: white;
+  color: #444;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-icon:hover {
+  background: #f0f0f0;
+  border-color: #ccc;
 }
 
 .popup-content {

@@ -9,11 +9,32 @@
   <body>
     <header>
       <h1>LK Tracker</h1>
-      <label class="toggle">
-        <input type="checkbox" id="tracking-toggle" />
-        <span class="slider"></span>
-        <span class="toggle-label" id="toggle-label">Off</span>
-      </label>
+      <div class="header-actions">
+        <button
+          type="button"
+          id="open-side-panel"
+          class="btn-icon"
+          title="Ouvrir en panneau latéral (Chrome)"
+          aria-label="Ouvrir en panneau latéral"
+          hidden
+        >
+          ▤
+        </button>
+        <button
+          type="button"
+          id="open-panel-window"
+          class="btn-icon"
+          title="Détacher en fenêtre (reste ouverte, redimensionnable)"
+          aria-label="Détacher en fenêtre"
+        >
+          ⧉
+        </button>
+        <label class="toggle">
+          <input type="checkbox" id="tracking-toggle" />
+          <span class="slider"></span>
+          <span class="toggle-label" id="toggle-label">Off</span>
+        </label>
+      </div>
     </header>
 
     <div class="popup-content">
