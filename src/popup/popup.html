@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LK Tracker</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>LK Tracker</h1>
+      <label class="toggle">
+        <input type="checkbox" id="tracking-toggle" />
+        <span class="slider"></span>
+        <span class="toggle-label" id="toggle-label">Off</span>
+      </label>
+    </header>
+
+    <section class="actions">
+      <button type="button" id="sync-connections" class="btn btn-secondary">
+        Sync connexions
+      </button>
+      <button type="button" id="export-excel" class="btn btn-primary">
+        Export Excel
+      </button>
+    </section>
+
+    <section class="sheets">
+      <h2>Google Sheet</h2>
+      <label for="spreadsheet-id">URL ou ID du sheet</label>
+      <input type="text" id="spreadsheet-id" placeholder="https://docs.google.com/spreadsheets/d/..." />
+
+      <label for="sheet-tab-name">Nom de l'onglet</label>
+      <input type="text" id="sheet-tab-name" value="Feuille 1" placeholder="Feuille 1 ou Sheet1" />
+
+      <div class="sheets-actions">
+        <button type="button" id="google-connect" class="btn btn-primary">Connecter Google</button>
+        <button type="button" id="google-disconnect" class="btn btn-secondary" hidden>
+          Déconnecter
+        </button>
+      </div>
+      <p id="sheets-status" class="sheets-status">Non connecté</p>
+    </section>
+
+    <section class="settings">
+      <label for="follow-up-days">Relance après (jours)</label>
+      <input type="number" id="follow-up-days" min="1" max="30" value="3" />
+    </section>
+
+    <section class="prospects">
+      <h2>Prospects (<span id="prospect-count">0</span>)</h2>
+      <ul id="prospect-list"></ul>
+    </section>
+
+    <p id="status-message" class="status-message" hidden></p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

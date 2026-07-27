@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "LK Tracker",
+  "version": "0.1.0",
+  "description": "Tracker de prospects LinkedIn",
+  "permissions": ["storage", "activeTab", "tabs", "downloads", "identity", "notifications"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://www.googleapis.com/*"
+  ],
+  "oauth2": {
+    "client_id": "262452710216-atsbu8jmn9r5sivvo36ldjknf1isvqv4.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LK Tracker"
+  },
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon48.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content-page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content-linkedin.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
