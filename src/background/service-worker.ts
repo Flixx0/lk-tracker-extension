@@ -6,6 +6,7 @@ import {
   findProspectByProfileUrl,
   getProspects,
   getSettings,
+  mergeProspectsFromSheet,
   normalizeProfileUrl,
   setSettings,
   updateProspect,
@@ -13,7 +14,9 @@ import {
 import { downloadExcel } from "../shared/export";
 import {
   extractSpreadsheetId,
+  fetchProspectsFromSheet,
   getGoogleAuthToken,
+  preferStatus,
   resolveTabName,
   revokeGoogleAuthToken,
   testSheetAccess,
@@ -118,6 +121,51 @@ async function syncProspectToSheet(prospect: Prospect): Promise<void> {
   await upsertProspect(token, settings.spreadsheetId, tabName, prospect);
 }
 
+let lastSheetPullAt = 0;
+const SHEET_PULL_COOLDOWN_MS = 60_000;
+
+async function pullAndMergeFromSheet(force = false): Promise<{
+  imported: number;
+  updated: number;
+  total: number;
+  sheetCount: number;
+}> {
+  const settings = await getSettings();
+  if (!settings.googleConnected || !settings.spreadsheetId) {
+    throw new Error("Google Sheet non connecté");
+  }
+
+  const now = Date.now();
+  if (!force && now - lastSheetPullAt < SHEET_PULL_COOLDOWN_MS) {
+    const local = await getProspects();
+    return { imported: 0, updated: 0, total: local.length, sheetCount: -1 };
+  }
+
+  const token = await getGoogleAuthToken(false);
+  const tabName = await resolveTabName(token, settings.spreadsheetId, settings.sheetTabName);
+  const sheetProspects = await fetchProspectsFromSheet(
+    token,
+    settings.spreadsheetId,
+    tabName
+  );
+  const result = await mergeProspectsFromSheet(sheetProspects, preferStatus);
+  lastSheetPullAt = Date.now();
+  return { ...result, sheetCount: sheetProspects.length };
+}
+
+async function pushAllProspectsToSheet(): Promise<number> {
+  const settings = await getSettings();
+  if (!settings.sheetsSyncEnabled || !settings.spreadsheetId) return 0;
+
+  const token = await getGoogleAuthToken(false);
+  const tabName = await resolveTabName(token, settings.spreadsheetId, settings.sheetTabName);
+  const allProspects = await getProspects();
+  for (const prospect of allProspects) {
+    await upsertProspect(token, settings.spreadsheetId, tabName, prospect);
+  }
+  return allProspects.length;
+}
+
 async function showNotification(title: string, message: string): Promise<void> {
   const settings = await getSettings();
   if (!settings.trackingEnabled) return;
@@ -214,6 +262,15 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
         sheetsSyncEnabled: true,
         googleConnected: true,
       });
+      // 1) Importer le sheet → local (pour savoir qui est déjà contacté)
+      const sheetProspects = await fetchProspectsFromSheet(
+        token,
+        spreadsheetId,
+        sheetInfo.tabName
+      );
+      const mergeResult = await mergeProspectsFromSheet(sheetProspects, preferStatus);
+      lastSheetPullAt = Date.now();
+      // 2) Pousser le local (complété) vers le sheet
       const allProspects = await getProspects();
       for (const prospect of allProspects) {
         await upsertProspect(token, spreadsheetId, sheetInfo.tabName, prospect);
@@ -223,6 +280,9 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
         title: sheetInfo.title,
         tabName: sheetInfo.tabName,
         synced: allProspects.length,
+        imported: mergeResult.imported,
+        updated: mergeResult.updated,
+        sheetCount: sheetProspects.length,
       };
 
     case "GOOGLE_DISCONNECT":
@@ -232,12 +292,32 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
         googleConnected: false,
       });
 
+    case "PULL_SHEET_SYNC":
+      const pullResult = await pullAndMergeFromSheet(true);
+      return pullResult;
+
+    case "PUSH_SHEET_SYNC":
+      const pushed = await pushAllProspectsToSheet();
+      return { ok: true, synced: pushed };
+
     case "GET_PROSPECTS":
       return await getProspects();
 
     case "CHECK_PROSPECT_EXISTS":
       const checkUrl = (message.payload as { profileUrl: string }).profileUrl;
-      const found = await findProspectByProfileUrl(checkUrl);
+      let found = await findProspectByProfileUrl(checkUrl);
+      if (!found) {
+        // Si connecté au sheet, re-synchronise (cooldown 60s) pour détecter les déjà contactés
+        const settings = await getSettings();
+        if (settings.googleConnected && settings.spreadsheetId) {
+          try {
+            await pullAndMergeFromSheet(false);
+            found = await findProspectByProfileUrl(checkUrl);
+          } catch (err) {
+            console.warn("[LK Tracker] Pull sheet on check:", err);
+          }
+        }
+      }
       return { exists: !!found, prospect: found };
 
     case "OPEN_PANEL_WINDOW":

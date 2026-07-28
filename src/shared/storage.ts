@@ -27,25 +27,89 @@ export async function saveProspects(prospects: Prospect[]): Promise<void> {
 
 export async function addProspect(prospect: Prospect): Promise<Prospect> {
   const prospects = await getProspects();
+  const normalized = normalizeProfileUrl(prospect.profileUrl);
   const existing = prospects.find(
-    (p) => p.profileUrl === prospect.profileUrl || p.id === prospect.id
+    (p) => normalizeProfileUrl(p.profileUrl) === normalized || p.id === prospect.id
   );
   if (existing) {
     const merged: Prospect = {
       ...existing,
       ...prospect,
+      id: existing.id,
+      profileUrl: normalizeProfileUrl(prospect.profileUrl || existing.profileUrl),
       name: prospect.name || existing.name,
       jobTitle: prospect.jobTitle || existing.jobTitle,
       profilePicture: prospect.profilePicture || existing.profilePicture,
+      invitationSentAt: prospect.invitationSentAt || existing.invitationSentAt,
+      connectionAcceptedAt: prospect.connectionAcceptedAt || existing.connectionAcceptedAt,
+      messageSentAt: prospect.messageSentAt || existing.messageSentAt,
+      followUpDate: prospect.followUpDate || existing.followUpDate,
+      createdAt: existing.createdAt || prospect.createdAt,
       updatedAt: new Date().toISOString(),
     };
     const updated = prospects.map((p) => (p.id === existing.id ? merged : p));
     await saveProspects(updated);
     return merged;
   }
-  prospects.push(prospect);
+  const toAdd: Prospect = {
+    ...prospect,
+    profileUrl: normalized,
+  };
+  prospects.push(toAdd);
   await saveProspects(prospects);
-  return prospect;
+  return toAdd;
+}
+
+/** Fusionne les prospects du sheet dans le stockage local. */
+export async function mergeProspectsFromSheet(
+  sheetProspects: Prospect[],
+  preferStatus: (a: Prospect["status"], b: Prospect["status"]) => Prospect["status"]
+): Promise<{ imported: number; updated: number; total: number }> {
+  const local = await getProspects();
+  const byUrl = new Map(local.map((p) => [normalizeProfileUrl(p.profileUrl), p]));
+
+  let imported = 0;
+  let updated = 0;
+
+  for (const sheet of sheetProspects) {
+    const url = normalizeProfileUrl(sheet.profileUrl);
+    const existing = byUrl.get(url);
+
+    if (!existing) {
+      byUrl.set(url, { ...sheet, profileUrl: url });
+      imported++;
+      continue;
+    }
+
+    const merged: Prospect = {
+      ...existing,
+      name: existing.name || sheet.name,
+      jobTitle: existing.jobTitle || sheet.jobTitle,
+      profilePicture: existing.profilePicture || sheet.profilePicture,
+      status: preferStatus(existing.status, sheet.status),
+      invitationSentAt: existing.invitationSentAt || sheet.invitationSentAt,
+      connectionAcceptedAt: existing.connectionAcceptedAt || sheet.connectionAcceptedAt,
+      messageSentAt: existing.messageSentAt || sheet.messageSentAt,
+      followUpDate: existing.followUpDate || sheet.followUpDate,
+      createdAt: existing.createdAt || sheet.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const changed =
+      merged.status !== existing.status ||
+      merged.jobTitle !== existing.jobTitle ||
+      merged.profilePicture !== existing.profilePicture ||
+      merged.name !== existing.name;
+
+    if (changed) {
+      byUrl.set(url, merged);
+      updated++;
+    }
+  }
+
+  const mergedList = Array.from(byUrl.values());
+  await saveProspects(mergedList);
+  return { imported, updated, total: mergedList.length };
 }
 
 export async function updateProspect(

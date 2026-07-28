@@ -8,6 +8,7 @@ function sendMessage<T>(message: ExtensionMessage): Promise<T> {
 const toggle = document.getElementById("tracking-toggle") as HTMLInputElement;
 const toggleLabel = document.getElementById("toggle-label")!;
 const syncBtn = document.getElementById("sync-connections")!;
+const syncSheetBtn = document.getElementById("sync-sheet") as HTMLButtonElement;
 const exportBtn = document.getElementById("export-excel")!;
 const followUpInput = document.getElementById("follow-up-days") as HTMLInputElement;
 const prospectList = document.getElementById("prospect-list")!;
@@ -259,6 +260,43 @@ async function loadProspects(): Promise<void> {
   renderProspects(prospects);
 }
 
+async function syncFromSheet(showFeedback = true): Promise<void> {
+  const settings = await sendMessage<AppSettings>({ type: "GET_SETTINGS" });
+  if (!settings.googleConnected || !settings.spreadsheetId) {
+    if (showFeedback) showStatus("Connecte d'abord Google Sheet", true);
+    return;
+  }
+
+  if (showFeedback) {
+    syncSheetBtn.disabled = true;
+    showStatus("Import depuis le sheet…");
+  }
+
+  try {
+    const result = await sendMessage<{
+      imported: number;
+      updated: number;
+      total: number;
+      sheetCount: number;
+    }>({ type: "PULL_SHEET_SYNC" });
+
+    await loadProspects();
+    await refreshDetectedProfile();
+
+    if (showFeedback) {
+      showStatus(
+        `Sheet sync : ${result.sheetCount} lignes → +${result.imported} importés, ${result.updated} mis à jour (${result.total} total)`
+      );
+    }
+  } catch (err) {
+    if (showFeedback) {
+      showStatus(`Erreur sync sheet : ${err instanceof Error ? err.message : String(err)}`, true);
+    }
+  } finally {
+    if (showFeedback) syncSheetBtn.disabled = false;
+  }
+}
+
 addCurrentProfileBtn.addEventListener("click", async () => {
   if (!currentDetectedProfile) return;
 
@@ -329,15 +367,25 @@ googleConnectBtn.addEventListener("click", async () => {
 
   googleConnectBtn.disabled = true;
   try {
-    const result = await sendMessage<{ title: string; tabName: string; synced: number }>({
+    const result = await sendMessage<{
+      title: string;
+      tabName: string;
+      synced: number;
+      imported: number;
+      sheetCount: number;
+    }>({
       type: "GOOGLE_CONNECT",
       payload: {
         spreadsheetId,
         sheetTabName: sheetTabInput.value.trim() || "Feuille 1",
       },
     });
-    showStatus(`Connecté à « ${result.title} » (onglet: ${result.tabName}, ${result.synced} lignes)`);
+    showStatus(
+      `Connecté à « ${result.title} » — ${result.sheetCount} dans le sheet (+${result.imported} importés), ${result.synced} sync`
+    );
     await loadSettings();
+    await loadProspects();
+    await refreshDetectedProfile();
   } catch (err) {
     showStatus(`Erreur: ${err instanceof Error ? err.message : String(err)}`, true);
   } finally {
@@ -349,6 +397,10 @@ googleDisconnectBtn.addEventListener("click", async () => {
   await sendMessage({ type: "GOOGLE_DISCONNECT" });
   showStatus("Google déconnecté");
   await loadSettings();
+});
+
+syncSheetBtn.addEventListener("click", () => {
+  syncFromSheet(true).catch(() => {});
 });
 
 syncBtn.addEventListener("click", async () => {
@@ -410,6 +462,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
 loadSettings();
 loadProspects();
 refreshDetectedProfile();
+syncFromSheet(false).catch(() => {});
 
 openPanelWindowBtn.addEventListener("click", async () => {
   openPanelWindowBtn.disabled = true;

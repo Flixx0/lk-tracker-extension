@@ -67,7 +67,9 @@ export type MessageType =
   | "GET_CURRENT_PROFILE"
   | "CHECK_PROSPECT_EXISTS"
   | "OPEN_PANEL_WINDOW"
-  | "OPEN_SIDE_PANEL";
+  | "OPEN_SIDE_PANEL"
+  | "PULL_SHEET_SYNC"
+  | "PUSH_SHEET_SYNC";
 
 export interface DetectedProfile {
   name: string;

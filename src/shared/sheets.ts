@@ -1,6 +1,6 @@
-import type { Prospect } from "./types";
+import type { Prospect, ProspectStatus } from "./types";
 import { STATUS_LABELS } from "./types";
-import { normalizeProfileUrl } from "./storage";
+import { createProspectId, normalizeProfileUrl } from "./storage";
 
 const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets";
 
@@ -18,6 +18,59 @@ export const SHEET_HEADERS = [
   "Créé le",
   "Mis à jour le",
 ];
+
+const STATUS_FROM_LABEL: Record<string, ProspectStatus> = Object.fromEntries(
+  Object.entries(STATUS_LABELS).map(([key, label]) => [label.toLowerCase(), key as ProspectStatus])
+) as Record<string, ProspectStatus>;
+
+const STATUS_RANK: Record<ProspectStatus, number> = {
+  invitation_envoyee: 1,
+  connecte: 2,
+  message_envoye: 3,
+  relance_a_faire: 3,
+};
+
+function parseStatus(value: string | undefined): ProspectStatus {
+  if (!value) return "invitation_envoyee";
+  const trimmed = value.trim();
+  if (trimmed in STATUS_RANK) return trimmed as ProspectStatus;
+  const fromLabel = STATUS_FROM_LABEL[trimmed.toLowerCase()];
+  if (fromLabel) return fromLabel;
+  return "invitation_envoyee";
+}
+
+function cell(row: string[], index: number): string {
+  return row[index]?.trim() ?? "";
+}
+
+export function rowToProspect(row: string[]): Prospect | null {
+  const profileUrlRaw = cell(row, 2);
+  if (!profileUrlRaw || !profileUrlRaw.includes("/in/")) return null;
+
+  const profileUrl = normalizeProfileUrl(profileUrlRaw);
+  const now = new Date().toISOString();
+  const id = cell(row, 0) || createProspectId(profileUrl);
+  const name = cell(row, 1) || profileUrl.split("/in/")[1] || "Inconnu";
+
+  return {
+    id,
+    name,
+    profileUrl,
+    jobTitle: cell(row, 3) || undefined,
+    profilePicture: cell(row, 4) || undefined,
+    status: parseStatus(cell(row, 5)),
+    invitationSentAt: cell(row, 6) || undefined,
+    connectionAcceptedAt: cell(row, 7) || undefined,
+    messageSentAt: cell(row, 8) || undefined,
+    followUpDate: cell(row, 9) || undefined,
+    createdAt: cell(row, 10) || now,
+    updatedAt: cell(row, 11) || now,
+  };
+}
+
+export function preferStatus(a: ProspectStatus, b: ProspectStatus): ProspectStatus {
+  return (STATUS_RANK[a] ?? 0) >= (STATUS_RANK[b] ?? 0) ? a : b;
+}
 
 export function extractSpreadsheetId(urlOrId: string): string {
   const match = urlOrId.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -211,6 +264,30 @@ export async function upsertProspect(
       }
     );
   }
+}
+
+/** Lit tous les prospects du Google Sheet (lignes de données A2:L). */
+export async function fetchProspectsFromSheet(
+  token: string,
+  spreadsheetId: string,
+  tabName: string
+): Promise<Prospect[]> {
+  await ensureHeaders(token, spreadsheetId, tabName);
+  const range = formatSheetRange(tabName, "A2:L");
+  const res = await sheetsFetch(
+    token,
+    spreadsheetId,
+    `/values/${encodeURIComponent(range)}`
+  );
+  const data = await res.json();
+  const values = (data.values as string[][] | undefined) ?? [];
+
+  const prospects: Prospect[] = [];
+  for (const row of values) {
+    const prospect = rowToProspect(row);
+    if (prospect) prospects.push(prospect);
+  }
+  return prospects;
 }
 
 export async function testSheetAccess(
