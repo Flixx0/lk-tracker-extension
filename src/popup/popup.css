@@ -188,6 +188,18 @@ h2 {
   width: 100%;
 }
 
+.current-profile-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.current-profile-actions .btn {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 8px 6px;
+}
+
 .current-profile-hint {
   margin: 8px 0 0;
   font-size: 11px;

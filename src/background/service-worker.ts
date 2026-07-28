@@ -363,13 +363,46 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
       await downloadExcel(prospects);
       return { ok: true, count: prospects.length };
 
+    case "RECORD_MESSAGE":
+      const recordUrl = (message.payload as { profileUrl: string }).profileUrl;
+      const recorded = await recordMessage(recordUrl);
+      if (recorded) {
+        await syncProspectToSheet(recorded).catch((err) =>
+          console.error("[LK Tracker] Sync sheet:", err)
+        );
+      }
+      return recorded;
+
+    case "SYNC_MESSAGES":
+      const messageThreads = message.payload as Array<{ name: string; profileUrl: string }>;
+      let messagesUpdated = 0;
+      for (const thread of messageThreads) {
+        const recordedMsg = await recordMessage(thread.profileUrl);
+        if (recordedMsg) {
+          await syncProspectToSheet(recordedMsg).catch((err) =>
+            console.error("[LK Tracker] Sync sheet:", err)
+          );
+          messagesUpdated++;
+        }
+      }
+      return { updated: messagesUpdated };
+
     case "SYNC_CONNECTIONS":
       const connections = message.payload as Array<{ name: string; profileUrl: string }>;
       let updatedCount = 0;
       for (const conn of connections) {
         const url = normalizeProfileUrl(conn.profileUrl);
         const existing = await findProspectByProfileUrl(url);
-        if (existing && existing.status === PROSPECT_STATUSES.INVITATION_SENT) {
+        if (!existing) continue;
+        // Ne jamais downgrader un statut message / relance
+        if (
+          existing.status === PROSPECT_STATUSES.MESSAGE_SENT ||
+          existing.status === PROSPECT_STATUSES.FOLLOW_UP_PENDING ||
+          existing.messageSentAt
+        ) {
+          continue;
+        }
+        if (existing.status === PROSPECT_STATUSES.INVITATION_SENT) {
           const connected = await updateProspect(existing.id, {
             status: PROSPECT_STATUSES.CONNECTED,
             connectionAcceptedAt: new Date().toISOString(),
@@ -413,13 +446,14 @@ export async function recordInvitation(profileData: {
   });
 }
 
+/** Enregistre le premier message uniquement — no-op si déjà messageSentAt. */
 export async function recordMessage(profileUrl: string): Promise<Prospect | null> {
   const settings = await getSettings();
   if (!settings.trackingEnabled) return null;
 
   const normalized = normalizeProfileUrl(profileUrl);
   const existing = await findProspectByProfileUrl(normalized);
-  if (!existing) return null;
+  if (!existing || existing.messageSentAt) return null;
 
   const now = new Date();
   const followUp = new Date(now);

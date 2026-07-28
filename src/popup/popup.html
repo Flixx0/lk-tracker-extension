@@ -49,9 +49,14 @@
             <div id="current-profile-location" class="current-profile-location"></div>
           </div>
         </div>
-        <button type="button" id="add-current-profile" class="btn btn-primary btn-block">
-          Ajouter à la liste
-        </button>
+        <div class="current-profile-actions">
+          <button type="button" id="add-current-profile" class="btn btn-primary">
+            Ajouter à la liste
+          </button>
+          <button type="button" id="copy-profile-for-ai" class="btn btn-secondary">
+            Copier pour IA
+          </button>
+        </div>
         <p id="current-profile-hint" class="current-profile-hint" hidden></p>
       </section>
 
@@ -62,6 +67,9 @@
       <section class="actions">
         <button type="button" id="sync-connections" class="btn btn-secondary">
           Sync connexions
+        </button>
+        <button type="button" id="sync-messages" class="btn btn-secondary">
+          Sync messages
         </button>
         <button type="button" id="sync-sheet" class="btn btn-secondary">
           Sync sheet

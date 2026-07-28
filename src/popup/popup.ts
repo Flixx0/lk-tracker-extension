@@ -1,5 +1,6 @@
 import type { AppSettings, DetectedProfile, ExtensionMessage, Prospect } from "../shared/types";
 import { STATUS_LABELS } from "../shared/types";
+import { formatProfileForAi } from "../shared/profile-ai-export";
 
 function sendMessage<T>(message: ExtensionMessage): Promise<T> {
   return chrome.runtime.sendMessage(message);
@@ -8,6 +9,7 @@ function sendMessage<T>(message: ExtensionMessage): Promise<T> {
 const toggle = document.getElementById("tracking-toggle") as HTMLInputElement;
 const toggleLabel = document.getElementById("toggle-label")!;
 const syncBtn = document.getElementById("sync-connections")!;
+const syncMessagesBtn = document.getElementById("sync-messages")!;
 const syncSheetBtn = document.getElementById("sync-sheet") as HTMLButtonElement;
 const exportBtn = document.getElementById("export-excel")!;
 const followUpInput = document.getElementById("follow-up-days") as HTMLInputElement;
@@ -30,6 +32,7 @@ const currentProfileName = document.getElementById("current-profile-name")!;
 const currentProfileJob = document.getElementById("current-profile-job")!;
 const currentProfileLocation = document.getElementById("current-profile-location")!;
 const addCurrentProfileBtn = document.getElementById("add-current-profile") as HTMLButtonElement;
+const copyProfileForAiBtn = document.getElementById("copy-profile-for-ai") as HTMLButtonElement;
 const currentProfileHint = document.getElementById("current-profile-hint")!;
 
 const openPanelWindowBtn = document.getElementById("open-panel-window") as HTMLButtonElement;
@@ -115,6 +118,27 @@ function normalizeProfileUrl(url: string): string {
 function isProfileInList(profileUrl: string): boolean {
   const norm = normalizeProfileUrl(profileUrl);
   return cachedProspects.some((p) => normalizeProfileUrl(p.profileUrl) === norm);
+}
+
+function findProspectForProfile(profileUrl: string): Prospect | undefined {
+  const norm = normalizeProfileUrl(profileUrl);
+  return cachedProspects.find((p) => normalizeProfileUrl(p.profileUrl) === norm);
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
 }
 
 async function checkProfileInDb(profileUrl: string): Promise<boolean> {
@@ -297,6 +321,26 @@ async function syncFromSheet(showFeedback = true): Promise<void> {
   }
 }
 
+copyProfileForAiBtn.addEventListener("click", async () => {
+  copyProfileForAiBtn.disabled = true;
+  try {
+    await refreshDetectedProfile();
+    if (!currentDetectedProfile) {
+      showStatus("Ouvre un profil LinkedIn (/in/…) pour copier", true);
+      return;
+    }
+
+    const prospect = findProspectForProfile(currentDetectedProfile.profileUrl);
+    const text = formatProfileForAi(currentDetectedProfile, prospect);
+    await copyTextToClipboard(text);
+    showStatus("Profil copié — prêt à coller dans ton IA");
+  } catch (err) {
+    showStatus(`Erreur copie : ${err instanceof Error ? err.message : String(err)}`, true);
+  } finally {
+    copyProfileForAiBtn.disabled = false;
+  }
+});
+
 addCurrentProfileBtn.addEventListener("click", async () => {
   if (!currentDetectedProfile) return;
 
@@ -403,21 +447,27 @@ syncSheetBtn.addEventListener("click", () => {
   syncFromSheet(true).catch(() => {});
 });
 
-syncBtn.addEventListener("click", async () => {
-  await chrome.storage.local.set({ lkPendingConnectionsSync: true });
+async function openLinkedInSync(options: {
+  pendingKey: string;
+  url: string;
+  triggerType: ExtensionMessage["type"];
+  statusText: string;
+  fallbackText: string;
+}): Promise<void> {
+  await chrome.storage.local.set({ [options.pendingKey]: true });
 
   const tab = await chrome.tabs.create({
-    url: "https://www.linkedin.com/mynetwork/invite-connect/connections/",
+    url: options.url,
     active: true,
   });
 
   if (!tab.id) return;
-  showStatus("Sync connexions en cours…");
+  showStatus(options.statusText);
 
   const tabId = tab.id;
   const triggerSync = async (): Promise<boolean> => {
     try {
-      await chrome.tabs.sendMessage(tabId, { type: "TRIGGER_CONNECTIONS_SYNC" });
+      await chrome.tabs.sendMessage(tabId, { type: options.triggerType });
       return true;
     } catch {
       return false;
@@ -431,7 +481,7 @@ syncBtn.addEventListener("click", async () => {
     const retry = async (attempt: number): Promise<void> => {
       if (await triggerSync()) return;
       if (attempt >= 8) {
-        showStatus("Page ouverte — sync auto dans quelques secondes");
+        showStatus(options.fallbackText);
         return;
       }
       setTimeout(() => retry(attempt + 1), 1500);
@@ -440,6 +490,26 @@ syncBtn.addEventListener("click", async () => {
     setTimeout(() => retry(0), 2000);
   };
   chrome.tabs.onUpdated.addListener(onUpdated);
+}
+
+syncBtn.addEventListener("click", async () => {
+  await openLinkedInSync({
+    pendingKey: "lkPendingConnectionsSync",
+    url: "https://www.linkedin.com/mynetwork/invite-connect/connections/",
+    triggerType: "TRIGGER_CONNECTIONS_SYNC",
+    statusText: "Sync connexions en cours…",
+    fallbackText: "Page ouverte — sync auto dans quelques secondes",
+  });
+});
+
+syncMessagesBtn.addEventListener("click", async () => {
+  await openLinkedInSync({
+    pendingKey: "lkPendingMessagesSync",
+    url: "https://www.linkedin.com/messaging/",
+    triggerType: "TRIGGER_MESSAGES_SYNC",
+    statusText: "Sync messages en cours…",
+    fallbackText: "Page ouverte — sync messages auto dans quelques secondes",
+  });
 });
 
 exportBtn.addEventListener("click", async () => {
@@ -455,6 +525,11 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   if (message.type === "CONNECTIONS_SYNC_DONE") {
     const { updated } = message.payload as { updated: number };
     showStatus(`${updated} prospect(s) marqué(s) connecté(s)`);
+    loadProspects();
+  }
+  if (message.type === "MESSAGES_SYNC_DONE") {
+    const { updated } = message.payload as { updated: number };
+    showStatus(`${updated} prospect(s) → message envoyé`);
     loadProspects();
   }
 });

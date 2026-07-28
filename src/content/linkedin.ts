@@ -28,5 +28,8 @@ const navigationTimer = setInterval(() => {
     if (location.pathname.includes("/mynetwork")) {
       initConnections();
     }
+    if (location.pathname.includes("/messaging")) {
+      initMessaging();
+    }
   }
 }, 1000);

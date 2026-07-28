@@ -13,6 +13,7 @@ import {
   isLikelySendInviteClick,
   isSendInviteLabel,
   parseNameFromInviteLabel,
+  sleep,
 } from "../shared/linkedin-dom";
 import { setAwaitingSendFlag } from "../shared/awaiting-flag";
 import {
@@ -558,8 +559,15 @@ function installProfileMessageListener(): void {
   chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
     if (message.type !== "GET_CURRENT_PROFILE") return;
 
-    const data = extractProfileData();
-    sendResponse(data);
+    void (async () => {
+      // Scroll léger pour charger les sections lazy (À propos, Expérience)
+      window.scrollTo(0, document.body.scrollHeight * 0.45);
+      await sleep(450);
+      window.scrollTo(0, 0);
+      await sleep(250);
+      sendResponse(extractProfileData());
+    })();
+
     return true;
   });
 }

@@ -60,6 +60,10 @@ export type MessageType =
   | "TRIGGER_CONNECTIONS_SYNC"
   | "CONNECTIONS_SYNC_PROGRESS"
   | "CONNECTIONS_SYNC_DONE"
+  | "RECORD_MESSAGE"
+  | "SYNC_MESSAGES"
+  | "TRIGGER_MESSAGES_SYNC"
+  | "MESSAGES_SYNC_DONE"
   | "SHOW_NOTIFICATION"
   | "SAVE_PENDING_INVITE"
   | "GET_PENDING_INVITE"
@@ -71,12 +75,29 @@ export type MessageType =
   | "PULL_SHEET_SYNC"
   | "PUSH_SHEET_SYNC";
 
+export interface ProfileExperience {
+  title: string;
+  company?: string;
+  period?: string;
+  location?: string;
+  description?: string;
+}
+
+export interface ProfileEducation {
+  school: string;
+  degree?: string;
+  period?: string;
+}
+
 export interface DetectedProfile {
   name: string;
   profileUrl: string;
   profilePicture?: string;
   jobTitle?: string;
   location?: string;
+  about?: string;
+  experiences?: ProfileExperience[];
+  education?: ProfileEducation[];
   alreadyInDb?: boolean;
 }
 
