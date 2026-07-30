@@ -403,8 +403,12 @@ function cleanJobTitle(raw: string): string {
   let t = raw.replace(/\s+/g, " ").trim();
   if (!t) return "";
 
-  t = t.split(/\s*[·•]\s*/)[0]?.trim() ?? t;
-  t = t.replace(/\s+\d+\+?\s*(relations|connections).*$/i, "").trim();
+  // Ne pas couper les headlines multi-rôles ("Coach · Formatrice · Consultante").
+  // On retire seulement les suffixes type "· 500+ relations".
+  t = t
+    .replace(/\s*[·•]\s*\d+\+?\s*(relations|connections|abonnés|followers).*$/i, "")
+    .replace(/\s+\d+\+?\s*(relations|connections|abonnés|followers).*$/i, "")
+    .trim();
 
   if (t.length > 180) t = t.slice(0, 180).trim();
   return t;
@@ -420,6 +424,11 @@ function isBadJobTitleCandidate(text: string): boolean {
   if (/^(1er|2e|3e|1st|2nd|3rd|2nd degree|3rd degree)$/i.test(t)) return true;
   if (/contact info|coordonnées|informations de contact/i.test(lower)) return true;
   if (/^(open to work|disponible|hiring|recrute)$/i.test(lower)) return true;
+  if (
+    /^(voir plus|see more|afficher plus|followers|abonnés|relations|connections)$/i.test(t)
+  ) {
+    return true;
+  }
   return (
     /^(se connecter|message|suivre|plus|en attente|connecter|inviter|voir|voir le profil)$/i.test(
       text
@@ -472,18 +481,20 @@ function scoreHeadlineCandidate(text: string, profileName: string): number {
   let score = 0;
   if (text.length >= 12) score += 2;
   if (text.length >= 25) score += 2;
+  if (text.length > 140) score -= 2; // trop long = souvent une description, pas la headline
   if (
-    /\b(at|chez|@|ceo|cto|cfo|founder|fondateur|directeur|directrice|manager|engineer|developer|consultant|lead|head of|responsable|freelance|consultante|consultant)\b/i.test(
+    /\b(at|chez|@|ceo|cto|cfo|founder|fondateur|directeur|directrice|manager|engineer|developer|consultant|lead|head of|responsable|freelance|consultante|coach|formateur|formatrice|expert|mentor)\b/i.test(
       text
     )
   ) {
     score += 4;
   }
-  if (/\||–|-/.test(text)) score += 1;
+  if (/\||–|-|·|•/.test(text)) score += 1;
   return score;
 }
 
 function extractHeadlineFromVoyagerScripts(root: ParentNode = document): string {
+  const vanity = getProfileSlugFromPath();
   const scriptPatterns = [
     /"headline"\s*:\s*"((?:\\.|[^"\\])*)"/,
     /"occupation"\s*:\s*"((?:\\.|[^"\\])*)"/,
@@ -491,18 +502,31 @@ function extractHeadlineFromVoyagerScripts(root: ParentNode = document): string 
     /"multiLocaleHeadline"\s*:\s*\{[^}]*"en_US"\s*:\s*"((?:\\.|[^"\\])*)"/,
   ];
 
+  const fallback: string[] = [];
+
   for (const script of Array.from(root.querySelectorAll("script:not([src])"))) {
     const content = script.textContent ?? "";
     if (content.length < 100) continue;
+
     for (const pattern of scriptPatterns) {
       const match = content.match(pattern);
       if (!match?.[1]) continue;
       const decoded = decodeJsonString(match[1]);
       const cleaned = cleanJobTitle(decoded);
-      if (cleaned.length >= 3 && !isBadJobTitleCandidate(cleaned)) return cleaned;
+      if (cleaned.length < 3 || isBadJobTitleCandidate(cleaned)) continue;
+
+      const prefersCurrent =
+        !vanity ||
+        content.includes(`/in/${vanity}`) ||
+        content.includes(`"publicIdentifier":"${vanity}"`) ||
+        content.includes(`"vanityName":"${vanity}"`);
+
+      if (prefersCurrent) return cleaned;
+      fallback.push(cleaned);
     }
   }
-  return "";
+
+  return fallback[0] ?? "";
 }
 
 function findSectionByHeading(
@@ -729,22 +753,43 @@ function isLikelyEducationText(text: string): boolean {
   return parts.length === 2 && parts.every((p) => p.length >= 3 && p.length <= 90);
 }
 
-/** Nouvelle UI LinkedIn : h2 + paragraphes (headline, école, ville) */
+function findProfileHeaderScope(nameEl: HTMLElement, root: ParentNode): ParentNode {
+  return (
+    (nameEl.closest(".pvs-profile-header__container") as ParentNode | null) ??
+    (nameEl.closest(".pv-text-details__left-panel") as ParentNode | null) ??
+    (nameEl.closest(".ph5") as ParentNode | null) ??
+    (nameEl.closest("header") as ParentNode | null) ??
+    (nameEl.closest("section") as ParentNode | null) ??
+    (nameEl.parentElement as ParentNode | null) ??
+    root
+  );
+}
+
+/** Nouvelle UI LinkedIn : headline limitée au header du profil (pas Experience / About). */
 function extractJobTitleFromProfileCard(root: ParentNode, profileName: string): string {
   const nameEl = findProfileNameElement(root);
   if (!nameEl) return "";
 
   const nameNorm = normalizeNameCompare(profileName);
+  const scope = findProfileHeaderScope(nameEl, root);
+
+  const anonymized = (scope as ParentNode).querySelector?.("[data-anonymize='headline']");
+  if (anonymized) {
+    const cleaned = cleanJobTitle(anonymized.textContent ?? "");
+    if (cleaned.length >= 3 && !isBadJobTitleCandidate(cleaned)) return cleaned;
+  }
+
   let best = "";
   let bestScore = -1;
+  let orderBonus = 20;
 
-  const paragraphs = Array.from(root.querySelectorAll<HTMLParagraphElement>("main p"));
+  const paragraphs = Array.from(
+    (scope as ParentNode).querySelectorAll?.<HTMLParagraphElement>("p") ?? []
+  );
 
   for (const p of paragraphs) {
     if (nameEl.contains(p)) continue;
-    if (nameEl.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_PRECEDING) {
-      continue;
-    }
+    if (nameEl.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_PRECEDING) continue;
 
     const raw = (p.textContent ?? "").trim().replace(/\s+/g, " ");
     if (!raw || raw.length < 3) continue;
@@ -756,14 +801,72 @@ function extractJobTitleFromProfileCard(root: ParentNode, profileName: string): 
     if (p.querySelector("a") && raw.length < 40) continue;
 
     const cleaned = cleanJobTitle(raw);
-    const score = scoreHeadlineCandidate(cleaned, profileName);
+    const score = scoreHeadlineCandidate(cleaned, profileName) + orderBonus;
+    orderBonus = Math.max(0, orderBonus - 3);
+    if (score > bestScore) {
+      bestScore = score;
+      best = cleaned;
+    }
+
+    // Premier bon candidat du header = headline LinkedIn réelle.
+    if (bestScore >= 8 && orderBonus <= 14) break;
+  }
+
+  return best;
+}
+
+/**
+ * Extrait le poste depuis une carte liste (search / suggestions) autour d'un clic.
+ * Évite de prendre le headline d'un autre profil sur la page.
+ */
+export function extractJobTitleNearElement(
+  element: HTMLElement,
+  profileName?: string
+): string {
+  const card =
+    (element.closest("li") as HTMLElement | null) ??
+    (element.closest("[role='listitem']") as HTMLElement | null) ??
+    (element.closest(
+      "[data-chameleon-result-urn], [data-view-name*='search'], .reusable-search__result-container"
+    ) as HTMLElement | null) ??
+    (element.closest("div") as HTMLElement | null);
+
+  if (!card) return "";
+
+  const anonymized = card.querySelector("[data-anonymize='headline']");
+  if (anonymized) {
+    const cleaned = cleanJobTitle(anonymized.textContent ?? "");
+    if (cleaned.length >= 3 && !isBadJobTitleCandidate(cleaned)) return cleaned;
+  }
+
+  const name =
+    profileName ??
+    card.querySelector("a[href*='/in/'] span[aria-hidden='true']")?.textContent?.trim() ??
+    card.querySelector("a[href*='/in/']")?.textContent?.trim() ??
+    "";
+
+  let best = "";
+  let bestScore = -1;
+
+  for (const el of Array.from(card.querySelectorAll<HTMLElement>("p, span, div"))) {
+    if (el.querySelector("p, span, div")) continue;
+    const raw = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+    if (!raw || raw.length < 6 || raw.length > 160) continue;
+    if (name && normalizeNameCompare(raw) === normalizeNameCompare(name)) continue;
+    if (isLikelyPronounsText(raw) || isLikelyLocationText(raw) || isLikelyEducationText(raw)) {
+      continue;
+    }
+    if (/se connecter|message|suivre|inviter|voir le profil|connect|follow/i.test(raw)) continue;
+
+    const cleaned = cleanJobTitle(raw);
+    const score = scoreHeadlineCandidate(cleaned, name);
     if (score > bestScore) {
       bestScore = score;
       best = cleaned;
     }
   }
 
-  return best;
+  return bestScore >= 2 ? best : "";
 }
 
 function extractLocationFromProfileCard(root: ParentNode): string {
@@ -778,19 +881,34 @@ function extractLocationFromProfileCard(root: ParentNode): string {
 export function extractJobTitle(root: ParentNode = document): string {
   const nameEl = findProfileNameElement(root);
   const profileName = nameEl?.textContent?.trim() ?? "";
+  const onProfilePage = location.pathname.includes("/in/");
 
-  // 1. Attribut dédié LinkedIn
+  // 1. Attribut dédié LinkedIn (préférer celui du header si possible)
+  if (nameEl) {
+    const scoped = findProfileHeaderScope(nameEl, root)
+      .querySelector?.("[data-anonymize='headline']");
+    if (scoped) {
+      const cleaned = cleanJobTitle(scoped.textContent ?? "");
+      if (cleaned.length >= 3 && !isBadJobTitleCandidate(cleaned)) return cleaned;
+    }
+  }
   const anonymized = root.querySelector("[data-anonymize='headline']");
   if (anonymized) {
     const cleaned = cleanJobTitle(anonymized.textContent ?? "");
     if (cleaned.length >= 3 && !isBadJobTitleCandidate(cleaned)) return cleaned;
   }
 
-  // 2. Données embarquées Voyager (fiable, avant le scan des <p>)
+  // 2. Carte profil (header uniquement) — avant Voyager pour éviter un faux headline
+  if (onProfilePage && profileName) {
+    const fromCard = extractJobTitleFromProfileCard(root, profileName);
+    if (fromCard) return fromCard;
+  }
+
+  // 3. Données embarquées Voyager (filtrées par vanity courant)
   const fromVoyager = extractHeadlineFromVoyagerScripts(root);
   if (fromVoyager) return fromVoyager;
 
-  // 3. JSON-LD
+  // 4. JSON-LD
   for (const script of Array.from(root.querySelectorAll("script[type='application/ld+json']"))) {
     try {
       const parsed = JSON.parse(script.textContent ?? "");
@@ -806,31 +924,13 @@ export function extractJobTitle(root: ParentNode = document): string {
     }
   }
 
-  // 4. Carte profil (nouvelle UI : h2 + <p> headline, pronoms filtrés)
-  if (location.pathname.includes("/in/") && profileName) {
-    const fromCard = extractJobTitleFromProfileCard(root, profileName);
-    if (fromCard) return fromCard;
-  }
-
   // 5. Poste actuel depuis la section expérience
   const currentExp = extractExperiencesFromPage(root, 1)[0];
   if (currentExp?.title && !isBadJobTitleCandidate(currentExp.title)) {
     return currentExp.title;
   }
 
-  // 6. Meta
-  for (const sel of [
-    'meta[property="og:description"]',
-    'meta[name="description"]',
-    'meta[property="twitter:description"]',
-  ]) {
-    const content = root.querySelector(sel)?.getAttribute("content");
-    if (!content || isBadJobTitleCandidate(content)) continue;
-    const cleaned = cleanJobTitle(content);
-    if (cleaned.length >= 3 && !isBadJobTitleCandidate(cleaned)) return cleaned;
-  }
-
-  // 7. DOM : texte juste sous le titre du profil (h1 ou h2)
+  // 6. DOM : texte juste sous le titre du profil (h1 ou h2)
   const heading = findProfileNameElement(root);
   const profileNameLegacy = heading?.textContent?.trim() ?? "";
 
@@ -843,14 +943,16 @@ export function extractJobTitle(root: ParentNode = document): string {
         text.length >= 3 &&
         text !== profileNameLegacy &&
         !isBadJobTitleCandidate(text) &&
-        !isLikelyPronounsText(text)
+        !isLikelyPronounsText(text) &&
+        !isLikelyLocationText(text) &&
+        !isLikelyEducationText(text)
       ) {
         return text;
       }
     }
   }
 
-  // 8. Sélecteurs classiques LinkedIn
+  // 7. Sélecteurs classiques LinkedIn
   const selectors = [
     "[data-anonymize='headline']",
     ".pv-text-details__left-panel .text-body-medium",
@@ -867,14 +969,16 @@ export function extractJobTitle(root: ParentNode = document): string {
         text.length >= 3 &&
         text !== profileNameLegacy &&
         !isBadJobTitleCandidate(text) &&
-        !isLikelyPronounsText(text)
+        !isLikelyPronounsText(text) &&
+        !isLikelyLocationText(text) &&
+        !isLikelyEducationText(text)
       ) {
         return text;
       }
     }
   }
 
-  // 9. Parcours DOM générique (dernier recours)
+  // 8. Parcours DOM générique (dernier recours)
   if (heading) {
     let container: HTMLElement | null = heading.parentElement;
     for (let depth = 0; depth < 6 && container; depth++) {
@@ -896,6 +1000,18 @@ export function extractJobTitle(root: ParentNode = document): string {
       if (best) return best;
       container = container.parentElement;
     }
+  }
+
+  // 9. Meta (souvent bruité : "Nom | 500+ relations | LinkedIn")
+  for (const sel of [
+    'meta[property="og:description"]',
+    'meta[name="description"]',
+    'meta[property="twitter:description"]',
+  ]) {
+    const content = root.querySelector(sel)?.getAttribute("content");
+    if (!content || isBadJobTitleCandidate(content)) continue;
+    const cleaned = cleanJobTitle(content);
+    if (cleaned.length >= 3 && !isBadJobTitleCandidate(cleaned)) return cleaned;
   }
 
   return "";

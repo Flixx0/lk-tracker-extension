@@ -2,6 +2,7 @@ import {
   extractProfileData,
   extractVanityFromConnectElement,
   extractJobTitle,
+  extractJobTitleNearElement,
   findActionFromClick,
   findActiveProfileUrl,
   findConnectInviteAnchor,
@@ -268,24 +269,33 @@ async function recordInvitation(reason: string): Promise<void> {
     return;
   }
 
-  // Complète poste / photo depuis pending ou re-scan DOM
-  if (!profileData.jobTitle && pending?.jobTitle) {
-    profileData.jobTitle = pending.jobTitle;
+  // Complète poste / photo depuis pending ou cache profil.
+  // Important: ne pas laisser un mauvais scrape de page (modale / liste) écraser
+  // un titre déjà capturé correctement au moment du clic « Se connecter ».
+  const cached = getProfileSnapshot(profileData.profileUrl);
+  const vanity = profileData.profileUrl.split("/in/")[1]?.replace(/\/$/, "");
+  const onOwnProfile =
+    !!vanity &&
+    (location.pathname.includes(`/in/${vanity}`) || location.pathname.includes(`/in/${vanity}/`));
+
+  const preferredTitle =
+    pending?.jobTitle?.trim() ||
+    cached?.jobTitle?.trim() ||
+    (onOwnProfile ? profileData.jobTitle?.trim() : "") ||
+    "";
+
+  if (preferredTitle) {
+    profileData.jobTitle = preferredTitle;
+  } else if (!profileData.jobTitle && onOwnProfile) {
+    const scraped = extractJobTitle();
+    if (scraped) profileData.jobTitle = scraped;
   }
+
   if (!profileData.profilePicture && pending?.profilePicture) {
     profileData.profilePicture = pending.profilePicture;
   }
-  if (!profileData.jobTitle || !profileData.profilePicture) {
-    const cached = getProfileSnapshot(profileData.profileUrl);
-    if (cached?.jobTitle && !profileData.jobTitle) profileData.jobTitle = cached.jobTitle;
-    if (cached?.profilePicture && !profileData.profilePicture) {
-      profileData.profilePicture = cached.profilePicture;
-    }
-  }
-
-  if (!profileData.jobTitle) {
-    const scraped = extractJobTitle();
-    if (scraped) profileData.jobTitle = scraped;
+  if (!profileData.profilePicture && cached?.profilePicture) {
+    profileData.profilePicture = cached.profilePicture;
   }
 
   console.log("[LK Tracker] Données prospect:", {
@@ -411,7 +421,18 @@ async function handleConnectClick(action: { element: HTMLElement; labels: string
     const profileUrl = `https://www.linkedin.com/in/${vanityName}`;
     const snapshot = extractProfileData();
     const cached = getProfileSnapshot(profileUrl);
-    const jobTitle = extractJobTitle() || snapshot?.jobTitle || cached?.jobTitle;
+    const onOwnProfile =
+      location.pathname.includes(`/in/${vanityName}`) ||
+      location.pathname.includes(`/in/${vanityName}/`);
+
+    // Priorité: carte cliquée (liste) → snapshot profil → extract global (uniquement si on est sur le profil).
+    const fromCard = extractJobTitleNearElement(action.element, parsedName ?? undefined);
+    const jobTitle =
+      fromCard ||
+      cached?.jobTitle ||
+      (onOwnProfile ? extractJobTitle() || snapshot?.jobTitle : undefined) ||
+      snapshot?.jobTitle;
+
     const pending: PendingInvite = {
       vanityName,
       profileUrl,

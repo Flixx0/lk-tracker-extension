@@ -1,6 +1,7 @@
 import type { AppSettings, DetectedProfile, ExtensionMessage, Prospect } from "../shared/types";
 import { STATUS_LABELS } from "../shared/types";
 import { formatProfileForAi } from "../shared/profile-ai-export";
+import { getOAuthRedirectUrl } from "../shared/sheets";
 
 function sendMessage<T>(message: ExtensionMessage): Promise<T> {
   return chrome.runtime.sendMessage(message);
@@ -21,6 +22,8 @@ const sheetTabInput = document.getElementById("sheet-tab-name") as HTMLInputElem
 const googleConnectBtn = document.getElementById("google-connect") as HTMLButtonElement;
 const googleDisconnectBtn = document.getElementById("google-disconnect") as HTMLButtonElement;
 const sheetsStatus = document.getElementById("sheets-status")!;
+const extensionIdEl = document.getElementById("extension-id")!;
+const oauthRedirectUriEl = document.getElementById("oauth-redirect-uri")!;
 
 const currentProfileSection = document.getElementById("current-profile-section")!;
 const noProfileHint = document.getElementById("no-profile-hint")!;
@@ -45,7 +48,7 @@ if (isWindowMode) {
   openSidePanelBtn.hidden = true;
 } else {
   document.body.classList.add("panel-mode");
-  if (chrome.sidePanel?.open) {
+  if (chrome.sidePanel) {
     openSidePanelBtn.hidden = false;
   }
 }
@@ -281,8 +284,29 @@ async function loadSettings(): Promise<void> {
 
 async function loadProspects(): Promise<void> {
   const prospects = await sendMessage<Prospect[]>({ type: "GET_PROSPECTS" });
+  if (!Array.isArray(prospects)) {
+    console.warn("[LK Tracker] GET_PROSPECTS invalide:", prospects);
+    return;
+  }
   renderProspects(prospects);
 }
+
+/** Rafraîchit la liste quand un prospect est ajouté depuis LinkedIn (content script). */
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.prospects) return;
+  const next = changes.prospects.newValue;
+  if (Array.isArray(next)) {
+    renderProspects(next as Prospect[]);
+  } else {
+    loadProspects().catch(() => {});
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    loadProspects().catch(() => {});
+  }
+});
 
 async function syncFromSheet(showFeedback = true): Promise<void> {
   const settings = await sendMessage<AppSettings>({ type: "GET_SETTINGS" });
@@ -431,7 +455,15 @@ googleConnectBtn.addEventListener("click", async () => {
     await loadProspects();
     await refreshDetectedProfile();
   } catch (err) {
-    showStatus(`Erreur: ${err instanceof Error ? err.message : String(err)}`, true);
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/invalid_request|bad client id|custom uri scheme/i.test(msg)) {
+      showStatus(
+        `OAuth Arc/Brave : crée un client « Web application », ajoute l'URI de redirection ci-dessous, puis mets son ID dans manifest → oauth2.web_client_id`,
+        true
+      );
+    } else {
+      showStatus(`Erreur: ${msg}`, true);
+    }
   } finally {
     googleConnectBtn.disabled = false;
   }
@@ -533,6 +565,13 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
     loadProspects();
   }
 });
+
+if (extensionIdEl && chrome.runtime?.id) {
+  extensionIdEl.textContent = chrome.runtime.id;
+}
+if (oauthRedirectUriEl) {
+  oauthRedirectUriEl.textContent = getOAuthRedirectUrl();
+}
 
 loadSettings();
 loadProspects();

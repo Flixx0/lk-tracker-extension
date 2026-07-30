@@ -19,22 +19,41 @@ Tu as activé l'API — il reste **4 étapes** dans Google Cloud + **2 étapes**
 3. **Charger l'extension non empaquetée** → dossier `dist/`
 4. Copie l'**ID de l'extension** (ex: `abcdefghijklmnopqrstuvwxyz123456`)
 
-## Étape 3 — Créer le Client ID OAuth (Chrome Extension)
+## Étape 3 — Créer les Client IDs OAuth
 
-1. **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth client ID**
-2. Type d'application : **Chrome Extension** (pas "Web application")
-3. **Item ID** : colle l'ID de l'extension (étape 2)
-4. Créer → copie le **Client ID** (format `xxxxx.apps.googleusercontent.com`)
+Tu peux avoir **plusieurs clients OAuth** dans le même projet Google Cloud (un par navigateur).
 
-## Étape 4 — Mettre le Client ID dans l'extension
+### A) Google Chrome (recommandé)
 
-Ouvre `manifest.json` et remplace :
+1. **Create Credentials** → **OAuth client ID**
+2. Type : **Chrome Extension**
+3. **Item ID** : ID de l'extension (`chrome://extensions`)
+4. Copie le Client ID → `manifest.json` → `oauth2.client_id`
+
+### B) Arc / Brave / Chromium (obligatoire si erreur « Custom URI scheme »)
+
+1. **Create Credentials** → **OAuth client ID**
+2. Type : **Web application** (pas Chrome Extension)
+3. **Authorized redirect URIs** : colle l'URI affichée dans le popup LK Tracker  
+   (format `https://<extension-id>.chromiumapp.org/`)
+4. Copie le Client ID → `manifest.json` → `oauth2.web_client_id`
+
+L'extension essaie d'abord `getAuthToken` (Chrome), puis bascule automatiquement sur `launchWebAuthFlow` (Arc/Brave).
+
+## Étape 4 — Mettre les Client IDs dans l'extension
+
+Ouvre `manifest.json` :
 
 ```json
-"client_id": "REMPLACE_PAR_TON_CLIENT_ID.apps.googleusercontent.com"
+"oauth2": {
+  "client_id": "TON_CLIENT_CHROME_EXTENSION.apps.googleusercontent.com",
+  "web_client_id": "TON_CLIENT_WEB_APPLICATION.apps.googleusercontent.com",
+  "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
+}
 ```
 
-par ton vrai Client ID.
+- `client_id` → client **Chrome Extension** (Google Chrome)
+- `web_client_id` → client **Web application** (Arc/Brave) — laisse vide si tu n'utilises que Chrome
 
 Puis rebuild :
 
@@ -66,6 +85,7 @@ Les prospects seront ajoutés/mis à jour automatiquement dans le sheet.
 | Erreur | Solution |
 |--------|----------|
 | `bad client id` | Client ID incorrect ou ID extension ne correspond pas |
+| `Custom URI scheme is not supported` | Tu es sur Arc/Brave : crée un client **Web application** + `web_client_id` |
 | `access_denied` | Ajoute ton email dans Test users (OAuth consent screen) |
 | `403` sur le sheet | Le sheet doit être accessible par ton compte Google |
 | Onglet introuvable | Vérifie le nom d'onglet (sensible à la casse) |

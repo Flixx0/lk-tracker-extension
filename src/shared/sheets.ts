@@ -84,7 +84,62 @@ export function formatSheetRange(tabName: string, a1Range: string): string {
   return `'${escaped}'!${a1Range}`;
 }
 
-export async function getGoogleAuthToken(interactive = true): Promise<string> {
+const GOOGLE_TOKEN_KEY = "googleOAuthAccessToken";
+const GOOGLE_TOKEN_EXPIRY_KEY = "googleOAuthTokenExpiry";
+
+interface ManifestOAuth2 {
+  client_id?: string;
+  web_client_id?: string;
+  scopes?: string[];
+}
+
+function getManifestOAuth2(): ManifestOAuth2 {
+  return (chrome.runtime.getManifest().oauth2 ?? {}) as ManifestOAuth2;
+}
+
+/** URI de redirection à enregistrer dans Google Cloud (type Web application). */
+export function getOAuthRedirectUrl(): string {
+  return chrome.identity.getRedirectURL();
+}
+
+async function getCachedGoogleToken(): Promise<string | null> {
+  const stored = await chrome.storage.local.get([GOOGLE_TOKEN_KEY, GOOGLE_TOKEN_EXPIRY_KEY]);
+  const token = stored[GOOGLE_TOKEN_KEY] as string | undefined;
+  const expiry = stored[GOOGLE_TOKEN_EXPIRY_KEY] as number | undefined;
+  if (!token || !expiry) return null;
+  if (Date.now() > expiry - 60_000) return null;
+  return token;
+}
+
+async function cacheGoogleToken(token: string, expiresInSeconds = 3600): Promise<void> {
+  await chrome.storage.local.set({
+    [GOOGLE_TOKEN_KEY]: token,
+    [GOOGLE_TOKEN_EXPIRY_KEY]: Date.now() + expiresInSeconds * 1000,
+  });
+}
+
+async function clearCachedGoogleToken(): Promise<void> {
+  await chrome.storage.local.remove([GOOGLE_TOKEN_KEY, GOOGLE_TOKEN_EXPIRY_KEY]);
+}
+
+function shouldUseWebAuthFlow(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes("invalid_request") ||
+    msg.includes("custom uri scheme") ||
+    msg.includes("chrome apps") ||
+    msg.includes("oauth2 not granted") ||
+    msg.includes("did not approve") ||
+    msg.includes("user cancelled") ||
+    msg.includes("canceled")
+  );
+}
+
+function prefersWebAuthFlow(): boolean {
+  return Boolean(getManifestOAuth2().web_client_id?.trim());
+}
+
+async function getAuthTokenViaIdentity(interactive: boolean): Promise<string> {
   return new Promise((resolve, reject) => {
     chrome.identity.getAuthToken({ interactive }, (token) => {
       if (chrome.runtime.lastError || !token) {
@@ -96,11 +151,85 @@ export async function getGoogleAuthToken(interactive = true): Promise<string> {
   });
 }
 
+async function getAuthTokenViaWebAuthFlow(interactive: boolean): Promise<string> {
+  const oauth2 = getManifestOAuth2();
+  const clientId = oauth2.web_client_id;
+  if (!clientId) {
+    throw new Error(
+      "OAuth Arc/Brave : crée un client « Web application » dans Google Cloud, ajoute l'URI de redirection affichée dans les paramètres, puis renseigne oauth2.web_client_id dans manifest.json"
+    );
+  }
+
+  const redirectUri = getOAuthRedirectUrl();
+  const scopes = (oauth2.scopes ?? ["https://www.googleapis.com/auth/spreadsheets"]).join(" ");
+
+  const authUrl =
+    `https://accounts.google.com/o/oauth2/v2/auth` +
+    `?client_id=${encodeURIComponent(clientId)}` +
+    `&response_type=token` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&scope=${encodeURIComponent(scopes)}` +
+    `&prompt=consent`;
+
+  const responseUrl = await new Promise<string>((resolve, reject) => {
+    chrome.identity.launchWebAuthFlow({ url: authUrl, interactive }, (url) => {
+      if (chrome.runtime.lastError || !url) {
+        const errMsg = chrome.runtime.lastError?.message ?? "Connexion Google annulée";
+        reject(
+          new Error(
+            `${errMsg}. Vérifie que l'URI de redirection est bien enregistrée dans Google Cloud : ${redirectUri}`
+          )
+        );
+        return;
+      }
+      resolve(url);
+    });
+  });
+
+  const params = new URLSearchParams(new URL(responseUrl).hash.replace(/^#/, ""));
+  const token = params.get("access_token");
+  const expiresIn = Number(params.get("expires_in") ?? "3600");
+
+  if (!token) {
+    const error = params.get("error_description") ?? params.get("error");
+    throw new Error(error ?? "Token absent dans la réponse OAuth");
+  }
+
+  await cacheGoogleToken(token, expiresIn);
+  return token;
+}
+
+export async function getGoogleAuthToken(interactive = true): Promise<string> {
+  const cached = await getCachedGoogleToken();
+  if (cached) return cached;
+
+  // Si web_client_id est configuré (Arc/Brave), ne pas appeler getAuthToken
+  // qui ouvre une popup invalide avant le vrai flux OAuth.
+  if (prefersWebAuthFlow()) {
+    return getAuthTokenViaWebAuthFlow(interactive);
+  }
+
+  try {
+    const token = await getAuthTokenViaIdentity(interactive);
+    await cacheGoogleToken(token, 3600);
+    return token;
+  } catch (err) {
+    if (!shouldUseWebAuthFlow(err)) throw err;
+    return getAuthTokenViaWebAuthFlow(interactive);
+  }
+}
+
 export async function revokeGoogleAuthToken(): Promise<void> {
-  const token = await getGoogleAuthToken(false).catch(() => null);
-  if (!token) return;
-  await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`);
-  chrome.identity.removeCachedAuthToken({ token });
+  const cached = await getCachedGoogleToken();
+  const identityToken = await getAuthTokenViaIdentity(false).catch(() => null);
+  const token = cached ?? identityToken;
+
+  if (token) {
+    await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`).catch(() => {});
+    chrome.identity.removeCachedAuthToken({ token }, () => {});
+  }
+
+  await clearCachedGoogleToken();
 }
 
 function prospectToRow(prospect: Prospect): string[] {

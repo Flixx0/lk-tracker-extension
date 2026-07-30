@@ -426,6 +426,21 @@ h2 {
   color: #0a66c2;
 }
 
+.extension-id-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #666;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.extension-id-hint code {
+  font-size: 10px;
+  background: #f0f0f0;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
 .status-message {
   margin-top: 8px;
   padding: 8px;
