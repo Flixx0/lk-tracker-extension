@@ -112,6 +112,15 @@ export async function mergeProspectsFromSheet(
   return { imported, updated, total: mergedList.length };
 }
 
+export async function deleteProspect(id: string): Promise<Prospect | null> {
+  const prospects = await getProspects();
+  const index = prospects.findIndex((p) => p.id === id);
+  if (index === -1) return null;
+  const [removed] = prospects.splice(index, 1);
+  await saveProspects(prospects);
+  return removed;
+}
+
 export async function updateProspect(
   id: string,
   patch: Partial<Prospect>

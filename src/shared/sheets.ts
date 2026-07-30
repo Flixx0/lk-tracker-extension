@@ -360,6 +360,55 @@ export async function findRowIndex(
   return null;
 }
 
+async function getSheetIdByTitle(
+  token: string,
+  spreadsheetId: string,
+  tabName: string
+): Promise<number> {
+  const res = await sheetsFetch(token, spreadsheetId, "?fields=sheets.properties");
+  const data = await res.json();
+  const sheet = (data.sheets ?? []).find(
+    (entry: { properties?: { title?: string; sheetId?: number } }) =>
+      entry.properties?.title === tabName
+  );
+  const sheetId = sheet?.properties?.sheetId;
+  if (sheetId == null) {
+    throw new Error(`Onglet "${tabName}" introuvable dans le Google Sheet`);
+  }
+  return sheetId;
+}
+
+/** Supprime la ligne du prospect dans le Google Sheet (par URL de profil). */
+export async function deleteProspectFromSheet(
+  token: string,
+  spreadsheetId: string,
+  tabName: string,
+  profileUrl: string
+): Promise<boolean> {
+  const existingRow = await findRowIndex(token, spreadsheetId, tabName, profileUrl);
+  if (!existingRow) return false;
+
+  const sheetId = await getSheetIdByTitle(token, spreadsheetId, tabName);
+  await sheetsFetch(token, spreadsheetId, ":batchUpdate", {
+    method: "POST",
+    body: JSON.stringify({
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: existingRow - 1,
+              endIndex: existingRow,
+            },
+          },
+        },
+      ],
+    }),
+  });
+  return true;
+}
+
 export async function upsertProspect(
   token: string,
   spreadsheetId: string,

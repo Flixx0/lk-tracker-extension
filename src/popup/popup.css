@@ -268,28 +268,75 @@ h2 {
   background: #d4d4d4;
 }
 
-.prospects {
+.prospect-accordions {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 8px;
   margin-bottom: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.prospects h2 {
-  flex-shrink: 0;
+.prospect-accordion {
+  flex: 0 0 auto;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: white;
 }
 
-#prospect-list {
+.prospect-accordion summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  padding: 10px 12px;
+  user-select: none;
   list-style: none;
-  padding: 0;
+}
+
+.prospect-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.prospect-accordion summary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.prospect-accordion[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.accordion-hint {
   margin: 0;
-  flex: 1 1 auto;
-  min-height: 0;
+  padding: 0 12px 8px;
+  font-size: 11px;
+  color: #666;
+}
+
+.accordion-empty {
+  margin: 0;
+  padding: 8px 12px 12px;
+  font-size: 12px;
+  color: #888;
+}
+
+.prospect-list-scroll {
+  list-style: none;
+  padding: 0 8px 8px;
+  margin: 0;
+  max-height: 240px;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+body.window-mode .prospect-list-scroll {
+  max-height: min(360px, 45vh);
 }
 
 .prospect-item {
@@ -346,6 +393,38 @@ h2 {
   font-weight: 500;
   background: #e8f4fc;
   color: #0a66c2;
+}
+
+.prospect-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-self: center;
+  gap: 4px;
+}
+
+.btn-prospect-action {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #f5f5f5;
+  color: #444;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.btn-prospect-action:hover {
+  background: #e8f4fc;
+  border-color: #b8d4f0;
+  color: #0a66c2;
+}
+
+.btn-delete-prospect:hover {
+  background: #fde8e8;
+  border-color: #f0b8b8;
+  color: #c5221f;
 }
 
 .popup-settings {

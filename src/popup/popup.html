@@ -79,9 +79,22 @@
         </button>
       </section>
 
-      <section class="prospects">
-        <h2>Prospects (<span id="prospect-count">0</span>)</h2>
-        <ul id="prospect-list"></ul>
+      <section class="prospect-accordions">
+        <details class="prospect-accordion" id="to-contact-accordion" open>
+          <summary>
+            À contacter (<span id="to-contact-count">0</span>)
+          </summary>
+          <p class="accordion-hint">Connectés sans message envoyé</p>
+          <ul id="to-contact-list" class="prospect-list-scroll"></ul>
+          <p id="to-contact-empty" class="accordion-empty" hidden>Aucun prospect à contacter.</p>
+        </details>
+
+        <details class="prospect-accordion" id="all-prospects-accordion">
+          <summary>
+            Tous les prospects (<span id="prospect-count">0</span>)
+          </summary>
+          <ul id="prospect-list" class="prospect-list-scroll"></ul>
+        </details>
       </section>
 
       <details class="popup-settings">

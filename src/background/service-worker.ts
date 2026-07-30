@@ -3,6 +3,7 @@ import { PROSPECT_STATUSES } from "../shared/types";
 import {
   addProspect,
   createProspectId,
+  deleteProspect,
   findProspectByProfileUrl,
   getProspects,
   getSettings,
@@ -21,6 +22,7 @@ import {
   revokeGoogleAuthToken,
   testSheetAccess,
   upsertProspect,
+  deleteProspectFromSheet,
 } from "../shared/sheets";
 
 const PENDING_INVITE_KEY = "pendingInvite";
@@ -119,6 +121,23 @@ async function syncProspectToSheet(prospect: Prospect): Promise<void> {
   const token = await getGoogleAuthToken(false);
   const tabName = await resolveTabName(token, settings.spreadsheetId, settings.sheetTabName);
   await upsertProspect(token, settings.spreadsheetId, tabName, prospect);
+}
+
+async function syncProspectDeletionFromSheet(
+  profileUrl: string
+): Promise<"skipped" | "deleted" | "not_found"> {
+  const settings = await getSettings();
+  if (!settings.sheetsSyncEnabled || !settings.spreadsheetId) return "skipped";
+
+  const token = await getGoogleAuthToken(false);
+  const tabName = await resolveTabName(token, settings.spreadsheetId, settings.sheetTabName);
+  const deleted = await deleteProspectFromSheet(
+    token,
+    settings.spreadsheetId,
+    tabName,
+    profileUrl
+  );
+  return deleted ? "deleted" : "not_found";
 }
 
 let lastSheetPullAt = 0;
@@ -337,6 +356,24 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
         console.error("[LK Tracker] Sync sheet:", err)
       );
       return added;
+
+    case "DELETE_PROSPECT": {
+      const { id } = message.payload as { id: string };
+      const removed = await deleteProspect(id);
+      if (!removed) return { ok: false };
+
+      let sheetSync: "skipped" | "deleted" | "not_found" | "error" = "skipped";
+      let sheetError: string | undefined;
+      try {
+        sheetSync = await syncProspectDeletionFromSheet(removed.profileUrl);
+      } catch (err) {
+        sheetSync = "error";
+        sheetError = err instanceof Error ? err.message : String(err);
+        console.error("[LK Tracker] Delete sheet:", err);
+      }
+
+      return { ok: true, sheetSync, sheetError };
+    }
 
     case "UPDATE_PROSPECT":
       const { id, profileUrl, patch } = message.payload as {

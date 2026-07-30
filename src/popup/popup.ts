@@ -1,5 +1,5 @@
 import type { AppSettings, DetectedProfile, ExtensionMessage, Prospect } from "../shared/types";
-import { STATUS_LABELS } from "../shared/types";
+import { PROSPECT_STATUSES, STATUS_LABELS } from "../shared/types";
 import { formatProfileForAi } from "../shared/profile-ai-export";
 import { getOAuthRedirectUrl } from "../shared/sheets";
 
@@ -16,6 +16,9 @@ const exportBtn = document.getElementById("export-excel")!;
 const followUpInput = document.getElementById("follow-up-days") as HTMLInputElement;
 const prospectList = document.getElementById("prospect-list")!;
 const prospectCount = document.getElementById("prospect-count")!;
+const toContactList = document.getElementById("to-contact-list")!;
+const toContactCount = document.getElementById("to-contact-count")!;
+const toContactEmpty = document.getElementById("to-contact-empty")!;
 const statusMessage = document.getElementById("status-message")!;
 const spreadsheetInput = document.getElementById("spreadsheet-id") as HTMLInputElement;
 const sheetTabInput = document.getElementById("sheet-tab-name") as HTMLInputElement;
@@ -224,31 +227,138 @@ async function refreshDetectedProfile(): Promise<void> {
   renderDetectedProfile(profile);
 }
 
+function isProspectToContact(prospect: Prospect): boolean {
+  return (
+    prospect.status === PROSPECT_STATUSES.CONNECTED &&
+    !prospect.messageSentAt
+  );
+}
+
+function sortProspectsByDate(prospects: Prospect[]): Prospect[] {
+  return [...prospects].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+}
+
+function createProspectActions(
+  prospect: Prospect,
+  options: { showCopyLink?: boolean } = {}
+): HTMLElement {
+  const actions = document.createElement("div");
+  actions.className = "prospect-actions";
+
+  if (options.showCopyLink) {
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "btn-prospect-action btn-copy-link";
+    copyBtn.title = "Copier le lien du profil";
+    copyBtn.setAttribute("aria-label", `Copier le lien de ${prospect.name}`);
+    copyBtn.textContent = "⧉";
+    copyBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await copyTextToClipboard(prospect.profileUrl);
+        showStatus(`Lien copié — ${prospect.name}`);
+      } catch {
+        showStatus("Erreur lors de la copie du lien", true);
+      }
+    });
+    actions.appendChild(copyBtn);
+  }
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "btn-prospect-action btn-delete-prospect";
+  deleteBtn.title = "Supprimer le prospect";
+  deleteBtn.setAttribute("aria-label", `Supprimer ${prospect.name}`);
+  deleteBtn.textContent = "✕";
+    deleteBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`Supprimer ${prospect.name} de la liste ?`)) return;
+
+    deleteBtn.disabled = true;
+    try {
+      const result = await sendMessage<{
+        ok: boolean;
+        sheetSync?: "skipped" | "deleted" | "not_found" | "error";
+        sheetError?: string;
+      }>({
+        type: "DELETE_PROSPECT",
+        payload: { id: prospect.id },
+      });
+      if (!result.ok) {
+        showStatus("Prospect introuvable", true);
+        await loadProspects();
+        return;
+      }
+      if (result.sheetSync === "error" && result.sheetError) {
+        showStatus(
+          `${prospect.name} supprimé localement — erreur Google Sheet : ${result.sheetError}`,
+          true
+        );
+      } else if (result.sheetSync === "not_found") {
+        showStatus(`${prospect.name} supprimé (ligne absente du sheet)`);
+      } else {
+        showStatus(`${prospect.name} supprimé`);
+      }
+      await loadProspects();
+    } catch (err) {
+      showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
+      deleteBtn.disabled = false;
+    }
+  });
+  actions.appendChild(deleteBtn);
+
+  return actions;
+}
+
+function createProspectListItem(
+  prospect: Prospect,
+  options: { showCopyLink?: boolean } = {}
+): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "prospect-item";
+
+  const body = document.createElement("div");
+  body.className = "prospect-body";
+  body.innerHTML = `
+    <div class="prospect-name">${escapeHtml(prospect.name)}</div>
+    <div class="prospect-meta">${escapeHtml(prospect.jobTitle ?? "")}</div>
+    <span class="prospect-status">${escapeHtml(STATUS_LABELS[prospect.status] ?? prospect.status)}</span>
+  `;
+
+  li.appendChild(createProspectAvatar(prospect.profilePicture));
+  li.appendChild(body);
+  li.appendChild(createProspectActions(prospect, options));
+
+  return li;
+}
+
+function renderProspectList(
+  container: HTMLElement,
+  prospects: Prospect[],
+  options: { showCopyLink?: boolean; limit?: number } = {}
+): void {
+  container.innerHTML = "";
+  const items = options.limit ? prospects.slice(0, options.limit) : prospects;
+  for (const prospect of items) {
+    container.appendChild(createProspectListItem(prospect, options));
+  }
+}
+
 function renderProspects(prospects: Prospect[]): void {
   cachedProspects = prospects;
   prospectCount.textContent = String(prospects.length);
-  prospectList.innerHTML = "";
 
-  const sorted = [...prospects].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  );
+  const sorted = sortProspectsByDate(prospects);
+  const toContact = sorted.filter(isProspectToContact);
 
-  for (const prospect of sorted.slice(0, 20)) {
-    const li = document.createElement("li");
-    li.className = "prospect-item";
-
-    const body = document.createElement("div");
-    body.className = "prospect-body";
-    body.innerHTML = `
-      <div class="prospect-name">${escapeHtml(prospect.name)}</div>
-      <div class="prospect-meta">${escapeHtml(prospect.jobTitle ?? "")}</div>
-      <span class="prospect-status">${escapeHtml(STATUS_LABELS[prospect.status] ?? prospect.status)}</span>
-    `;
-
-    li.appendChild(createProspectAvatar(prospect.profilePicture));
-    li.appendChild(body);
-    prospectList.appendChild(li);
-  }
+  toContactCount.textContent = String(toContact.length);
+  toContactEmpty.hidden = toContact.length > 0;
+  renderProspectList(toContactList, toContact, { showCopyLink: true });
+  renderProspectList(prospectList, sorted, { limit: 50 });
 
   if (currentDetectedProfile) {
     renderDetectedProfile(currentDetectedProfile);
