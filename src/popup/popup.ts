@@ -1,10 +1,20 @@
 import type { AppSettings, DetectedProfile, ExtensionMessage, Prospect } from "../shared/types";
 import { PROSPECT_STATUSES, STATUS_LABELS } from "../shared/types";
 import { formatProfileForAi } from "../shared/profile-ai-export";
-import { getOAuthRedirectUrl } from "../shared/sheets";
+import { getOAuthRedirectUrl, hasCachedGoogleToken } from "../shared/sheets";
 
 function sendMessage<T>(message: ExtensionMessage): Promise<T> {
-  return chrome.runtime.sendMessage(message);
+  return chrome.runtime.sendMessage(message).then((response) => {
+    if (
+      response &&
+      typeof response === "object" &&
+      "error" in response &&
+      (response as { error?: unknown }).error
+    ) {
+      throw new Error(String((response as { error: unknown }).error));
+    }
+    return response as T;
+  });
 }
 
 const toggle = document.getElementById("tracking-toggle") as HTMLInputElement;
@@ -427,7 +437,7 @@ async function syncFromSheet(showFeedback = true): Promise<void> {
 
   if (showFeedback) {
     syncSheetBtn.disabled = true;
-    showStatus("Import depuis le sheet…");
+    showStatus("Sync Google Sheet (import + export)…");
   }
 
   try {
@@ -436,14 +446,26 @@ async function syncFromSheet(showFeedback = true): Promise<void> {
       updated: number;
       total: number;
       sheetCount: number;
-    }>({ type: "PULL_SHEET_SYNC" });
+      pushed?: number;
+      sheetUpdated?: number;
+      sheetAppended?: number;
+    }>({
+      type: "PULL_SHEET_SYNC",
+      payload: {
+        mode: showFeedback ? "full" : "pull",
+        interactive: showFeedback,
+      },
+    });
 
     await loadProspects();
     await refreshDetectedProfile();
 
     if (showFeedback) {
+      const pushed = result.pushed ?? 0;
+      const appended = result.sheetAppended ?? 0;
+      const updatedRows = result.sheetUpdated ?? 0;
       showStatus(
-        `Sheet sync : ${result.sheetCount} lignes → +${result.imported} importés, ${result.updated} mis à jour (${result.total} total)`
+        `Sheet sync : ${result.sheetCount} lus → +${result.imported} importés, ${result.updated} maj locales · ${pushed} envoyés (${updatedRows} maj, ${appended} nouveaux)`
       );
     }
   } catch (err) {
@@ -589,6 +611,77 @@ syncSheetBtn.addEventListener("click", () => {
   syncFromSheet(true).catch(() => {});
 });
 
+const PANEL_WINDOW_ID_KEY = "lkPanelWindowId";
+
+async function isExtensionPanelWindow(windowId: number): Promise<boolean> {
+  const stored = await chrome.storage.local.get(PANEL_WINDOW_ID_KEY);
+  if (stored[PANEL_WINDOW_ID_KEY] === windowId) return true;
+
+  // Filet de sécurité Arc : fenêtre qui ne contient que le popup extension
+  const tabs = await chrome.tabs.query({ windowId });
+  if (tabs.length === 0) return false;
+  const extensionOrigin = chrome.runtime.getURL("");
+  return tabs.every((tab) => (tab.url ?? tab.pendingUrl ?? "").startsWith(extensionOrigin));
+}
+
+/** Fenêtre navigateur « normale » (pas la fenêtre détachée LK Tracker). Critique sur Arc. */
+async function findBrowserWindowForSync(): Promise<number | undefined> {
+  const windows = await chrome.windows.getAll({
+    populate: true,
+    windowTypes: ["normal"],
+  });
+
+  const candidates: chrome.windows.Window[] = [];
+  for (const win of windows) {
+    if (win.id == null) continue;
+    if (await isExtensionPanelWindow(win.id)) continue;
+    candidates.push(win);
+  }
+
+  if (candidates.length === 0) return undefined;
+
+  const withLinkedIn = candidates.find((win) =>
+    win.tabs?.some((tab) => (tab.url ?? "").includes("linkedin.com"))
+  );
+  if (withLinkedIn?.id != null) return withLinkedIn.id;
+
+  const focused = candidates.find((win) => win.focused);
+  if (focused?.id != null) return focused.id;
+
+  return candidates[0]?.id;
+}
+
+async function openOrReuseLinkedInTab(url: string): Promise<chrome.tabs.Tab | null> {
+  const windowId = await findBrowserWindowForSync();
+
+  if (windowId != null) {
+    const pathHint = url.includes("/messaging")
+      ? "https://www.linkedin.com/messaging/*"
+      : "https://www.linkedin.com/mynetwork/*";
+
+    const existing = await chrome.tabs.query({ windowId, url: [pathHint] });
+    const reusable = existing.find((tab) => tab.id != null);
+
+    if (reusable?.id != null) {
+      await chrome.tabs.update(reusable.id, { url, active: true });
+      await chrome.windows.update(windowId, { focused: true });
+      return reusable;
+    }
+
+    const created = await chrome.tabs.create({ url, active: true, windowId });
+    await chrome.windows.update(windowId, { focused: true });
+    return created;
+  }
+
+  // Aucune fenêtre navigateur : en ouvrir une neuve (évite d'injecter LinkedIn dans le panneau)
+  const win = await chrome.windows.create({
+    url,
+    type: "normal",
+    focused: true,
+  });
+  return win.tabs?.[0] ?? null;
+}
+
 async function openLinkedInSync(options: {
   pendingKey: string;
   url: string;
@@ -598,12 +691,12 @@ async function openLinkedInSync(options: {
 }): Promise<void> {
   await chrome.storage.local.set({ [options.pendingKey]: true });
 
-  const tab = await chrome.tabs.create({
-    url: options.url,
-    active: true,
-  });
+  const tab = await openOrReuseLinkedInTab(options.url);
+  if (!tab?.id) {
+    showStatus("Impossible d'ouvrir LinkedIn pour la sync", true);
+    return;
+  }
 
-  if (!tab.id) return;
   showStatus(options.statusText);
 
   const tabId = tab.id;
@@ -632,6 +725,16 @@ async function openLinkedInSync(options: {
     setTimeout(() => retry(0), 2000);
   };
   chrome.tabs.onUpdated.addListener(onUpdated);
+
+  // Onglet déjà sur la bonne page (réutilisé) : onUpdated peut ne pas se déclencher
+  const alreadyOnTarget =
+    (options.url.includes("/messaging") && (tab.url ?? "").includes("/messaging")) ||
+    (options.url.includes("connections") && (tab.url ?? "").includes("connections"));
+  if (alreadyOnTarget && tab.status === "complete") {
+    setTimeout(() => {
+      triggerSync().catch(() => {});
+    }, 2500);
+  }
 }
 
 syncBtn.addEventListener("click", async () => {
@@ -686,15 +789,17 @@ if (oauthRedirectUriEl) {
 loadSettings();
 loadProspects();
 refreshDetectedProfile();
-syncFromSheet(false).catch(() => {});
+// Pull silencieux seulement si un token est déjà en cache — jamais de popup OAuth à l'ouverture
+hasCachedGoogleToken()
+  .then((hasToken) => (hasToken ? syncFromSheet(false) : undefined))
+  .catch(() => {});
 
 openPanelWindowBtn.addEventListener("click", async () => {
   openPanelWindowBtn.disabled = true;
   try {
     // Ouvre la fenêtre depuis le popup (plus fiable qu'via le SW, surtout sur Arc)
-    const KEY = "lkPanelWindowId";
-    const stored = await chrome.storage.local.get(KEY);
-    const existingId = stored[KEY] as number | undefined;
+    const stored = await chrome.storage.local.get(PANEL_WINDOW_ID_KEY);
+    const existingId = stored[PANEL_WINDOW_ID_KEY] as number | undefined;
 
     if (existingId) {
       try {
@@ -707,7 +812,7 @@ openPanelWindowBtn.addEventListener("click", async () => {
         window.close();
         return;
       } catch {
-        await chrome.storage.local.remove(KEY);
+        await chrome.storage.local.remove(PANEL_WINDOW_ID_KEY);
       }
     }
 
@@ -720,7 +825,7 @@ openPanelWindowBtn.addEventListener("click", async () => {
     });
 
     if (win.id) {
-      await chrome.storage.local.set({ [KEY]: win.id });
+      await chrome.storage.local.set({ [PANEL_WINDOW_ID_KEY]: win.id });
       await chrome.windows.update(win.id, { width: 420, height: 720, state: "normal" });
     }
     window.close();

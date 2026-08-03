@@ -12,6 +12,7 @@ const PENDING_SYNC_KEY = "lkPendingConnectionsSync";
 let syncRunning = false;
 
 async function syncConnections(): Promise<void> {
+  if (window !== window.top) return;
   if (syncRunning) return;
   if (!isExtensionContextValid()) return;
 

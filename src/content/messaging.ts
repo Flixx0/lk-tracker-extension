@@ -126,6 +126,7 @@ function matchProspectsByConversationNames(
 }
 
 async function syncMessages(): Promise<void> {
+  if (window !== window.top) return;
   if (syncRunning) return;
   if (!isExtensionContextValid()) return;
 

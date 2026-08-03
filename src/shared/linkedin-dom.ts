@@ -1256,24 +1256,30 @@ function nameFromConnectionAnchor(anchor: HTMLAnchorElement): string {
 
 /** Scroll la liste de connexions (conteneur scrollable LinkedIn) */
 export async function scrollConnectionsList(maxScrolls = 35): Promise<void> {
-  const scrollRoot =
-    document.querySelector<HTMLElement>(".scaffold-finite-scroll__content") ??
-    document.querySelector<HTMLElement>("[class*='scaffold-finite-scroll']") ??
-    document.querySelector<HTMLElement>("main .scaffold-layout__main") ??
-    document.querySelector<HTMLElement>("main") ??
-    document.documentElement;
-
   let lastCount = 0;
   let stableRounds = 0;
 
   for (let i = 0; i < maxScrolls; i++) {
+    const preferred =
+      document.querySelector<HTMLElement>(".scaffold-finite-scroll__content") ??
+      document.querySelector<HTMLElement>("[class*='scaffold-finite-scroll']") ??
+      document.querySelector<HTMLElement>("main .scaffold-layout__main") ??
+      document.querySelector<HTMLElement>("main");
+
+    const scrollRoot =
+      (preferred && (findNearestScrollable(preferred) ?? preferred)) ||
+      findNearestScrollable(document.body) ||
+      document.documentElement;
+
     if (scrollRoot === document.documentElement || scrollRoot === document.body) {
       window.scrollTo(0, document.body.scrollHeight);
     } else {
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
+      scrollRoot.dispatchEvent(new Event("scroll", { bubbles: true }));
       window.scrollTo(0, document.body.scrollHeight);
     }
 
+    requestPageBridgeScroll(scrollRoot);
     await sleep(900);
 
     const currentCount = document.querySelectorAll(
@@ -1334,18 +1340,83 @@ export interface MessagingConversationEntry {
 }
 
 /** Conteneur scrollable de la liste de conversations LinkedIn */
+function isVerticallyScrollable(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el);
+  const overflowY = style.overflowY;
+  const allowsScroll =
+    overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay";
+  return allowsScroll && el.scrollHeight > el.clientHeight + 8;
+}
+
+function findNearestScrollable(start: HTMLElement | null): HTMLElement | null {
+  let el: HTMLElement | null = start;
+  while (el && el !== document.documentElement) {
+    if (isVerticallyScrollable(el)) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
 function findMessagingListScrollRoot(): HTMLElement {
-  return (
+  const list =
     document.querySelector<HTMLElement>(".msg-conversations-container__conversations-list") ??
     document.querySelector<HTMLElement>(".msg-conversations-container") ??
-    document.querySelector<HTMLElement>(".scaffold-finite-scroll__content") ??
     document.querySelector<HTMLElement>("[class*='msg-conversations']") ??
-    document.querySelector<HTMLElement>("[class*='conversations-list']") ??
-    document.querySelector<HTMLElement>("aside .scaffold-finite-scroll") ??
-    document.querySelector<HTMLElement>("aside") ??
-    document.querySelector<HTMLElement>("main") ??
-    document.documentElement
-  );
+    document.querySelector<HTMLElement>("[class*='conversations-list']");
+
+  const fromList = findNearestScrollable(list);
+  if (fromList) return fromList;
+
+  const candidates = [
+    document.querySelector<HTMLElement>(".msg-conversations-container__conversations-list"),
+    document.querySelector<HTMLElement>(".msg-conversations-container"),
+    document.querySelector<HTMLElement>(".scaffold-finite-scroll__content"),
+    document.querySelector<HTMLElement>("[class*='msg-conversations']"),
+    document.querySelector<HTMLElement>("[class*='conversations-list']"),
+    document.querySelector<HTMLElement>("aside .scaffold-finite-scroll"),
+    document.querySelector<HTMLElement>("aside"),
+    document.querySelector<HTMLElement>("main"),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const scrollable = findNearestScrollable(candidate) ?? (isVerticallyScrollable(candidate) ? candidate : null);
+    if (scrollable) return scrollable;
+  }
+
+  // Dernier recours : plus grand conteneur scrollable dans aside/main
+  const searchRoots = [
+    document.querySelector("aside"),
+    document.querySelector("main"),
+    document.body,
+  ].filter(Boolean) as HTMLElement[];
+
+  let best: HTMLElement | null = null;
+  let bestScore = 0;
+  for (const root of searchRoots) {
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
+      if (!isVerticallyScrollable(el)) continue;
+      const score = el.scrollHeight - el.clientHeight;
+      if (score > bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+  }
+
+  return best ?? document.documentElement;
+}
+
+function requestPageBridgeScroll(scrollRoot: HTMLElement): void {
+  document.querySelectorAll("[data-lk-scroll]").forEach((el) => el.removeAttribute("data-lk-scroll"));
+  scrollRoot.setAttribute("data-lk-scroll", "1");
+  window.postMessage({ source: "lk-tracker", type: "DOM_SCROLL" }, "*");
+}
+
+function requestPageBridgeClick(target: HTMLElement): void {
+  document.querySelectorAll("[data-lk-target]").forEach((el) => el.removeAttribute("data-lk-target"));
+  target.setAttribute("data-lk-target", "1");
+  window.postMessage({ source: "lk-tracker", type: "DOM_CLICK" }, "*");
 }
 
 function findMessagingListRoot(): HTMLElement {
@@ -1503,17 +1574,80 @@ function conversationClickTarget(card: HTMLElement): HTMLElement {
     card.querySelector<HTMLElement>(".msg-conversations-container__convo-item-link") ??
     card.querySelector<HTMLElement>(".msg-conversation-card") ??
     card.querySelector<HTMLElement>("a[href*='/messaging/thread/']") ??
+    card.querySelector<HTMLElement>("[role='option'], [role='row'], [role='link'], [role='button']") ??
     card
   );
 }
 
+function dispatchPointerClick(target: HTMLElement): void {
+  const rect = target.getBoundingClientRect();
+  const x = rect.left + Math.min(Math.max(rect.width / 2, 8), 48);
+  const y = rect.top + Math.min(Math.max(rect.height / 2, 8), 28);
+  const base: MouseEventInit = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+    button: 0,
+    buttons: 1,
+  };
+
+  try {
+    target.focus?.();
+  } catch {
+    /* ignore */
+  }
+
+  target.dispatchEvent(
+    new PointerEvent("pointerdown", {
+      ...base,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+    })
+  );
+  target.dispatchEvent(new MouseEvent("mousedown", base));
+  target.dispatchEvent(
+    new PointerEvent("pointerup", {
+      ...base,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      buttons: 0,
+    })
+  );
+  target.dispatchEvent(new MouseEvent("mouseup", { ...base, buttons: 0 }));
+  target.dispatchEvent(new MouseEvent("click", { ...base, buttons: 0 }));
+  if (typeof target.click === "function") target.click();
+}
+
 function clickConversationCard(card: HTMLElement): void {
   const target = conversationClickTarget(card);
-  target.dispatchEvent(
-    new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
-  );
-  // Certains handlers Ember écoutent aussi le click natif
-  if (typeof target.click === "function") target.click();
+  try {
+    target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  } catch {
+    /* ignore */
+  }
+
+  // 1) Clic depuis le content script
+  dispatchPointerClick(target);
+
+  // 2) Même séquence dans le monde page (souvent nécessaire sur Arc)
+  requestPageBridgeClick(target);
+
+  // 3) Lien thread si présent
+  const threadLink =
+    card.querySelector<HTMLAnchorElement>("a[href*='/messaging/thread/']") ??
+    (target instanceof HTMLAnchorElement && target.href.includes("/messaging/thread/")
+      ? target
+      : null);
+  if (threadLink) {
+    dispatchPointerClick(threadLink);
+    requestPageBridgeClick(threadLink);
+  }
 }
 
 function profileUrlFromCard(card: HTMLElement): string | undefined {
@@ -1552,23 +1686,59 @@ export async function waitForMessagingList(timeoutMs = 15000): Promise<boolean> 
 
 /** Scroll la liste de messages jusqu'à stabilisation */
 export async function scrollMessagingList(maxScrolls = 40): Promise<void> {
-  const scrollRoot = findMessagingListScrollRoot();
   let lastCount = 0;
   let stableRounds = 0;
 
   for (let i = 0; i < maxScrolls; i++) {
+    // Recalculer à chaque tour : LinkedIn remplace parfois le conteneur
+    const scrollRoot = findMessagingListScrollRoot();
+    const items = getMessagingConversationElements();
+    const lastItem = items[items.length - 1];
+
+    if (lastItem) {
+      try {
+        lastItem.scrollIntoView({ block: "end", inline: "nearest" });
+      } catch {
+        /* ignore */
+      }
+    }
+
     if (scrollRoot === document.documentElement || scrollRoot === document.body) {
       window.scrollTo(0, document.body.scrollHeight);
     } else {
+      const before = scrollRoot.scrollTop;
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
+      if (scrollRoot.scrollTop === before) {
+        scrollRoot.scrollBy({
+          top: Math.max(scrollRoot.clientHeight * 0.9, 320),
+          behavior: "instant" as ScrollBehavior,
+        });
+      }
+      scrollRoot.dispatchEvent(new Event("scroll", { bubbles: true }));
     }
 
-    await sleep(700);
+    // Scroll aussi via le page bridge (monde MAIN) — critique sur Arc
+    requestPageBridgeScroll(scrollRoot);
+
+    // Wheel artificiel pour les listes virtualisées
+    try {
+      scrollRoot.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: Math.max(scrollRoot.clientHeight * 0.8, 400),
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+
+    await sleep(850);
 
     const currentCount = countMessagingConversationItems();
     if (currentCount <= lastCount) {
       stableRounds++;
-      if (stableRounds >= 3) break;
+      if (stableRounds >= 4) break;
     } else {
       stableRounds = 0;
       lastCount = currentCount;

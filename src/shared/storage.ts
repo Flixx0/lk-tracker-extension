@@ -99,7 +99,10 @@ export async function mergeProspectsFromSheet(
       merged.status !== existing.status ||
       merged.jobTitle !== existing.jobTitle ||
       merged.profilePicture !== existing.profilePicture ||
-      merged.name !== existing.name;
+      merged.name !== existing.name ||
+      merged.invitationSentAt !== existing.invitationSentAt ||
+      merged.connectionAcceptedAt !== existing.connectionAcceptedAt ||
+      merged.messageSentAt !== existing.messageSentAt;
 
     if (changed) {
       byUrl.set(url, merged);

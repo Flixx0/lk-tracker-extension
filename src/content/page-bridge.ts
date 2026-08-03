@@ -156,6 +156,79 @@ import {
 
   window.addEventListener("pointerdown", onUserAction, true);
 
+  /** Actions DOM demandées par le content script (scroll/clic messagerie) — contexte page. */
+  window.addEventListener("message", (event: MessageEvent) => {
+    if (event.source !== window) return;
+    const data = event.data as {
+      source?: string;
+      type?: string;
+    } | null;
+    if (!data || data.source !== "lk-tracker") return;
+
+    if (data.type === "DOM_CLICK") {
+      const el = document.querySelector<HTMLElement>("[data-lk-target='1']");
+      if (!el) return;
+      el.removeAttribute("data-lk-target");
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + Math.min(rect.width / 2, 40);
+      const y = rect.top + Math.min(rect.height / 2, 24);
+      const base = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        screenX: x,
+        screenY: y,
+        button: 0,
+        buttons: 1,
+      };
+      try {
+        el.focus?.();
+        el.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            ...base,
+            pointerId: 1,
+            pointerType: "mouse",
+            isPrimary: true,
+          })
+        );
+        el.dispatchEvent(new MouseEvent("mousedown", base));
+        el.dispatchEvent(
+          new PointerEvent("pointerup", {
+            ...base,
+            pointerId: 1,
+            pointerType: "mouse",
+            isPrimary: true,
+            buttons: 0,
+          })
+        );
+        el.dispatchEvent(new MouseEvent("mouseup", { ...base, buttons: 0 }));
+        el.dispatchEvent(new MouseEvent("click", { ...base, buttons: 0 }));
+        el.click();
+      } catch (err) {
+        console.warn("[LK Tracker] page bridge click:", err);
+      }
+      return;
+    }
+
+    if (data.type === "DOM_SCROLL") {
+      const el = document.querySelector<HTMLElement>("[data-lk-scroll='1']");
+      if (!el) return;
+      try {
+        const before = el.scrollTop;
+        el.scrollTop = el.scrollHeight;
+        if (el.scrollTop === before) {
+          el.scrollBy({ top: Math.max(el.clientHeight * 0.85, 400), behavior: "instant" as ScrollBehavior });
+        }
+        el.dispatchEvent(new Event("scroll", { bubbles: true }));
+        window.dispatchEvent(new Event("scroll", { bubbles: true }));
+      } catch (err) {
+        console.warn("[LK Tracker] page bridge scroll:", err);
+      }
+    }
+  });
+
   if (window === window.top) {
     installInvitationToastWatcher((text) => {
       emit("lk-invitation-toast", { text });
