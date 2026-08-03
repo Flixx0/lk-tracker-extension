@@ -1,6 +1,5 @@
 import {
-  parseConnectionsFromPage,
-  scrollConnectionsList,
+  collectConnectionsFromPage,
 } from "../shared/linkedin-dom";
 import { isExtensionContextValid } from "../shared/extension-context";
 import { logActivity } from "../shared/log-activity";
@@ -30,17 +29,36 @@ async function syncConnections(): Promise<void> {
     await logActivity("Sync connexions en cours…", "LK Tracker", false, true);
     console.log("[LK Tracker] Début sync connexions…", location.pathname);
 
-    await scrollConnectionsList();
+    const prospects =
+      (await sendToBackground<Array<{ profileUrl: string }>>({ type: "GET_PROSPECTS" })) ?? [];
+    const targetUrls = prospects.map((p) => p.profileUrl).filter(Boolean);
 
-    const connections = parseConnectionsFromPage();
-    console.log(`[LK Tracker] ${connections.length} connexions trouvées sur la page`);
+    const connections = await collectConnectionsFromPage({
+      maxScrolls: 12,
+      targetUrls,
+    });
+    const withTitle = connections.filter((c) => c.jobTitle).length;
+    const withChoices = connections.filter((c) => (c.jobTitleCandidates?.length ?? 0) > 0).length;
+    console.log(
+      `[LK Tracker] ${connections.length} connexions (${withTitle} titre auto, ${withChoices} à choisir)`,
+      connections.slice(0, 3).map((c) => ({
+        name: c.name,
+        jobTitle: c.jobTitle,
+        candidates: c.jobTitleCandidates,
+      }))
+    );
 
     if (connections.length === 0) {
       await logActivity("Aucune connexion trouvée sur la page", "LK Tracker — sync", true);
       return;
     }
 
-    const result = await sendToBackground<{ updated: number }>({
+    const result = await sendToBackground<{
+      updated: number;
+      metaUpdated?: number;
+      titlesPending?: number;
+      touched?: number;
+    }>({
       type: "SYNC_CONNECTIONS",
       payload: connections,
     });
@@ -50,10 +68,19 @@ async function syncConnections(): Promise<void> {
       return;
     }
 
-    console.log(`[LK Tracker] ${result.updated} prospects mis à jour (connecté)`);
+    console.log(
+      `[LK Tracker] Sync connexions: ${result.updated} → connecté(s), ${result.metaUpdated ?? 0} photo/titre maj, ${result.titlesPending ?? 0} titres à choisir`
+    );
+
+    const meta = result.metaUpdated ?? 0;
+    const pending = result.titlesPending ?? 0;
+    const statusPart =
+      result.updated > 0 ? `${result.updated} → connecté(s)` : "aucun nouveau connecté";
+    const metaPart = meta > 0 ? `${meta} photo/titre mis à jour` : null;
+    const pendingPart = pending > 0 ? `${pending} titre(s) à choisir dans le popup` : null;
 
     await logActivity(
-      `Sync terminée : ${result.updated} prospect(s) → connecté(s)`,
+      `Sync terminée : ${[statusPart, metaPart, pendingPart].filter(Boolean).join(" · ")}`,
       "LK Tracker — sync"
     );
 

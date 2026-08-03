@@ -324,20 +324,89 @@ function createProspectActions(
   return actions;
 }
 
+function hasTitleChoices(prospect: Prospect): boolean {
+  return (prospect.jobTitleCandidates?.length ?? 0) >= 1;
+}
+
+async function chooseJobTitle(prospectId: string, jobTitle: string): Promise<void> {
+  await sendMessage({
+    type: "UPDATE_PROSPECT",
+    payload: {
+      id: prospectId,
+      patch: {
+        jobTitle,
+        jobTitleCandidates: [],
+      },
+    },
+  });
+  showStatus(`Titre enregistré — ${jobTitle.slice(0, 60)}`);
+  await loadProspects();
+}
+
+function appendTitleChoices(body: HTMLElement, prospect: Prospect): void {
+  if (!hasTitleChoices(prospect)) return;
+
+  const choices = document.createElement("div");
+  choices.className = "title-choices";
+
+  const label = document.createElement("div");
+  label.className = "title-choices-label";
+  label.textContent = "Choisir un titre :";
+  choices.appendChild(label);
+
+  for (const title of prospect.jobTitleCandidates ?? []) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-title-choice";
+    btn.textContent = title;
+    btn.title = `Choisir : ${title}`;
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      btn.disabled = true;
+      try {
+        await chooseJobTitle(prospect.id, title);
+      } catch (err) {
+        showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
+        btn.disabled = false;
+      }
+    });
+    choices.appendChild(btn);
+  }
+
+  body.appendChild(choices);
+}
+
 function createProspectListItem(
   prospect: Prospect,
   options: { showCopyLink?: boolean } = {}
 ): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "prospect-item";
+  if (hasTitleChoices(prospect)) li.classList.add("has-title-choices");
 
   const body = document.createElement("div");
   body.className = "prospect-body";
-  body.innerHTML = `
-    <div class="prospect-name">${escapeHtml(prospect.name)}</div>
-    <div class="prospect-meta">${escapeHtml(prospect.jobTitle ?? "")}</div>
-    <span class="prospect-status">${escapeHtml(STATUS_LABELS[prospect.status] ?? prospect.status)}</span>
-  `;
+
+  const nameEl = document.createElement("div");
+  nameEl.className = "prospect-name";
+  nameEl.textContent = prospect.name;
+  body.appendChild(nameEl);
+
+  const metaEl = document.createElement("div");
+  metaEl.className = "prospect-meta";
+  metaEl.textContent = prospect.jobTitle?.trim() || (hasTitleChoices(prospect) ? "Titre à choisir" : "");
+  if (!prospect.jobTitle?.trim() && hasTitleChoices(prospect)) {
+    metaEl.classList.add("prospect-meta-pending");
+  }
+  body.appendChild(metaEl);
+
+  const statusEl = document.createElement("span");
+  statusEl.className = "prospect-status";
+  statusEl.textContent = STATUS_LABELS[prospect.status] ?? prospect.status;
+  body.appendChild(statusEl);
+
+  appendTitleChoices(body, prospect);
 
   li.appendChild(createProspectAvatar(prospect.profilePicture));
   li.appendChild(body);
@@ -768,8 +837,17 @@ exportBtn.addEventListener("click", async () => {
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   if (message.type === "CONNECTIONS_SYNC_DONE") {
-    const { updated } = message.payload as { updated: number };
-    showStatus(`${updated} prospect(s) marqué(s) connecté(s)`);
+    const { updated, metaUpdated, titlesPending } = message.payload as {
+      updated: number;
+      metaUpdated?: number;
+      titlesPending?: number;
+    };
+    const parts = [
+      updated > 0 ? `${updated} connecté(s)` : null,
+      (metaUpdated ?? 0) > 0 ? `${metaUpdated} photo/titre maj` : null,
+      (titlesPending ?? 0) > 0 ? `${titlesPending} titre(s) à choisir` : null,
+    ].filter(Boolean);
+    showStatus(parts.length > 0 ? parts.join(" · ") : "Aucun prospect à mettre à jour");
     loadProspects();
   }
   if (message.type === "MESSAGES_SYNC_DONE") {

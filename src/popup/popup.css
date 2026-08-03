@@ -427,6 +427,49 @@ body.window-mode .prospect-list-scroll {
   color: #c5221f;
 }
 
+.title-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.title-choices-label {
+  font-size: 11px;
+  color: #666;
+  font-weight: 500;
+}
+
+.btn-title-choice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #f7f7f7;
+  color: #222;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.btn-title-choice:hover {
+  background: #e8f4fc;
+  border-color: #b8d4f0;
+  color: #0a66c2;
+}
+
+.prospect-meta-pending {
+  color: #b26a00;
+  font-style: italic;
+}
+
+.prospect-item.has-title-choices {
+  border-color: #f0d9a8;
+  background: #fffdf8;
+}
+
 .popup-settings {
   flex-shrink: 0;
   border-top: 1px solid #e8e8e8;

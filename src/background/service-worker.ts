@@ -27,6 +27,7 @@ import {
   deleteProspectFromSheet,
   withGoogleSheetsToken,
 } from "../shared/sheets";
+import { isLikelyConnectionDateText } from "../shared/linkedin-dom";
 
 const PENDING_INVITE_KEY = "pendingInvite";
 const PANEL_WINDOW_ID_KEY = "lkPanelWindowId";
@@ -491,36 +492,139 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
     }
 
     case "SYNC_CONNECTIONS": {
-      const connections = message.payload as Array<{ name: string; profileUrl: string }>;
-      let updatedCount = 0;
+      const connections = message.payload as Array<{
+        name: string;
+        profileUrl: string;
+        jobTitle?: string;
+        jobTitleCandidates?: string[];
+        profilePicture?: string;
+      }>;
+      let statusUpdated = 0;
+      let metaUpdated = 0;
+      let titlesPending = 0;
+
+      const normalizeTitle = (value?: string): string =>
+        (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+      const photoIdentity = (url?: string): string => {
+        if (!url?.trim()) return "";
+        try {
+          const parsed = new URL(url.trim());
+          return parsed.pathname
+            .replace(/shrink_\d+_\d+/gi, "SIZE")
+            .replace(/\/$/, "");
+        } catch {
+          return url.split("?")[0]?.replace(/shrink_\d+_\d+/gi, "SIZE") ?? url;
+        }
+      };
+
+      const mergeTitleCandidates = (...lists: Array<string[] | undefined>): string[] => {
+        const map = new Map<string, string>();
+        for (const list of lists) {
+          for (const raw of list ?? []) {
+            const t = raw.trim().replace(/\s+/g, " ");
+            if (t.length < 3) continue;
+            if (isLikelyConnectionDateText(t)) continue;
+            const key = t.toLowerCase();
+            if (!map.has(key)) map.set(key, t);
+          }
+        }
+        return Array.from(map.values()).slice(0, 8);
+      };
+
       for (const conn of connections) {
         const url = normalizeProfileUrl(conn.profileUrl);
         const existing = await findProspectByProfileUrl(url);
         if (!existing) continue;
-        // Ne jamais downgrader un statut message / relance
-        if (
-          existing.status === PROSPECT_STATUSES.MESSAGE_SENT ||
-          existing.status === PROSPECT_STATUSES.FOLLOW_UP_PENDING ||
-          existing.messageSentAt
-        ) {
-          continue;
+
+        const patch: Partial<Prospect> = {};
+
+        const canMarkConnected =
+          existing.status === PROSPECT_STATUSES.INVITATION_SENT &&
+          !existing.messageSentAt;
+
+        if (canMarkConnected) {
+          patch.status = PROSPECT_STATUSES.CONNECTED;
+          patch.connectionAcceptedAt =
+            existing.connectionAcceptedAt ?? new Date().toISOString();
         }
-        if (existing.status === PROSPECT_STATUSES.INVITATION_SENT) {
-          const connected = await updateProspect(existing.id, {
-            status: PROSPECT_STATUSES.CONNECTED,
-            connectionAcceptedAt: new Date().toISOString(),
-          });
-          if (connected) {
-            updatedCount++;
+
+        const incomingCandidates = mergeTitleCandidates(
+          conn.jobTitleCandidates,
+          conn.jobTitle ? [conn.jobTitle] : undefined,
+          existing.jobTitleCandidates
+        );
+
+        const existingTitleBad =
+          !existing.jobTitle?.trim() || isLikelyConnectionDateText(existing.jobTitle);
+
+        if (incomingCandidates.length >= 1) {
+          const confident =
+            incomingCandidates.length === 1 &&
+            !!conn.jobTitle &&
+            normalizeTitle(conn.jobTitle) === normalizeTitle(incomingCandidates[0]);
+
+          if (confident) {
+            if (normalizeTitle(incomingCandidates[0]) !== normalizeTitle(existing.jobTitle)) {
+              patch.jobTitle = incomingCandidates[0];
+            }
+            if ((existing.jobTitleCandidates?.length ?? 0) > 0) {
+              patch.jobTitleCandidates = [];
+            }
+          } else {
+            // Ambigu ou non sûr → choix sur la card (même 1 candidat)
+            const sameAsExisting =
+              existing.jobTitleCandidates &&
+              existing.jobTitleCandidates.length === incomingCandidates.length &&
+              existing.jobTitleCandidates.every(
+                (t, i) => normalizeTitle(t) === normalizeTitle(incomingCandidates[i])
+              );
+            if (!sameAsExisting) {
+              patch.jobTitleCandidates = incomingCandidates;
+            }
+            if (existingTitleBad && !existing.jobTitle?.trim()) {
+              // laisser vide jusqu'au choix
+            } else if (existingTitleBad) {
+              patch.jobTitle = "";
+            }
+          }
+        } else if (existingTitleBad && existing.jobTitle) {
+          patch.jobTitle = "";
+        }
+
+        const nextPhoto = conn.profilePicture?.trim();
+        if (nextPhoto && photoIdentity(nextPhoto) !== photoIdentity(existing.profilePicture)) {
+          patch.profilePicture = nextPhoto;
+        }
+
+        const nextName = conn.name?.trim();
+        if (
+          nextName &&
+          nextName.length >= 2 &&
+          nextName.toLowerCase() !== (existing.name ?? "").trim().toLowerCase()
+        ) {
+          if (nextName.length >= existing.name.length || !existing.name.trim()) {
+            patch.name = nextName;
           }
         }
+
+        if (Object.keys(patch).length === 0) continue;
+
+        const updated = await updateProspect(existing.id, patch);
+        if (!updated) continue;
+
+        if (patch.status) statusUpdated++;
+        if (patch.jobTitle || patch.profilePicture || patch.name) metaUpdated++;
+        if ((patch.jobTitleCandidates?.length ?? 0) >= 1) titlesPending++;
       }
-      if (updatedCount > 0) {
+
+      const touched = statusUpdated + metaUpdated + titlesPending;
+      if (touched > 0) {
         await pushAllProspectsToSheet(false).catch((err) =>
           console.error("[LK Tracker] Sync sheet connexions:", err)
         );
       }
-      return { updated: updatedCount };
+      return { updated: statusUpdated, metaUpdated, titlesPending, touched };
     }
   }
 }

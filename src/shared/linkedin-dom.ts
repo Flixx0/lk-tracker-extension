@@ -419,6 +419,7 @@ function isBadJobTitleCandidate(text: string): boolean {
   const lower = t.toLowerCase();
   if (text.length < 3 || text.length > 200) return true;
   if (isLikelyPronounsText(text)) return true;
+  if (isLikelyConnectionDateText(text)) return true;
   if (/^\d+\+?\s*(relations|connections|abonnés|followers)/i.test(t)) return true;
   if (/^[·•]\s*\d/.test(t)) return true;
   if (/^(1er|2e|3e|1st|2nd|3rd|2nd degree|3rd degree)$/i.test(t)) return true;
@@ -438,6 +439,30 @@ function isBadJobTitleCandidate(text: string): boolean {
     lower.includes("sign up") ||
     lower.includes("linkedin login")
   );
+}
+
+/** Ex. "Connexion le 1 août 2026" / "Connected on August 1, 2026" — pas un titre. */
+export function isLikelyConnectionDateText(text: string): boolean {
+  const t = text.trim().replace(/\s+/g, " ");
+  if (!t || t.length > 80) return false;
+
+  if (
+    /^(connexion|connecté|connectée|connected)\s+(le|on)\b/i.test(t) ||
+    /\b(connexion|connecté|connectée|connected)\s+(le|on)\s+\d/i.test(t)
+  ) {
+    return true;
+  }
+
+  // Date seule typique LinkedIn : "1 août 2026", "August 1, 2026"
+  if (
+    /^\d{1,2}\s+(janv|févr|mars|avr|mai|juin|juil|août|sept|oct|nov|déc|january|february|march|april|may|june|july|august|september|october|november|december)/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function isLikelyPronounsText(text: string): boolean {
@@ -856,6 +881,7 @@ export function extractJobTitleNearElement(
     if (isLikelyPronounsText(raw) || isLikelyLocationText(raw) || isLikelyEducationText(raw)) {
       continue;
     }
+    if (isLikelyConnectionDateText(raw)) continue;
     if (/se connecter|message|suivre|inviter|voir le profil|connect|follow/i.test(raw)) continue;
 
     const cleaned = cleanJobTitle(raw);
@@ -1254,12 +1280,271 @@ function nameFromConnectionAnchor(anchor: HTMLAnchorElement): string {
   return direct;
 }
 
-/** Scroll la liste de connexions (conteneur scrollable LinkedIn) */
-export async function scrollConnectionsList(maxScrolls = 35): Promise<void> {
-  let lastCount = 0;
+function connectionCardFromAnchor(anchor: HTMLAnchorElement): HTMLElement {
+  return (
+    (anchor.closest(
+      [
+        "[componentkey]",
+        "[data-display-contents='true'] > *",
+        ".mn-connection-card",
+        "[class*='mn-connection']",
+        "[class*='connection-card']",
+        "li.artdeco-list__item",
+        "[data-view-name*='connection']",
+        "li",
+      ].join(", ")
+    ) as HTMLElement | null) ?? anchor
+  );
+}
+
+function profilePictureFromConnectionCard(card: HTMLElement): string | undefined {
+  const preferred = card.querySelectorAll<HTMLImageElement>(
+    [
+      "img.presence-entity__image",
+      "img.EntityPhoto-circle-5",
+      "img.EntityPhoto-circle-4",
+      "img.mn-connection-card__picture",
+      "img[class*='presence-entity']",
+      "img[class*='EntityPhoto']",
+      "img",
+    ].join(", ")
+  );
+
+  for (const img of Array.from(preferred)) {
+    if (img.closest("header, nav, [role='navigation']")) continue;
+    const url = resolveBestImageUrl(img) || img.currentSrc || img.src || img.getAttribute("src") || "";
+    if (url && isValidProfilePhotoUrl(url)) return url;
+  }
+  return undefined;
+}
+
+function isConnectionUiNoiseLine(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (isLikelyConnectionDateText(t)) return true;
+  if (isLikelyPronounsText(t)) return true;
+  if (
+    /^(message|messagerie|connecter|se connecter|suivre|follow|connect|plus|more|afficher plus|voir plus|load more|show more|remove|retirer|ignorer|ignore)$/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (/^(1er|2e|3e|1st|2nd|3rd)\b/i.test(t)) return true;
+  if (/^\d+\+?\s*(relations|connections)/i.test(t)) return true;
+  return false;
+}
+
+export interface ConnectionTitleExtraction {
+  /** Titre sûr (occupation / 2e paragraphe du lien profil). */
+  confidentTitle?: string;
+  /** Tous les titres possibles pour choix manuel. */
+  candidates: string[];
+}
+
+/**
+ * Extraction permissive du titre sur une carte connexion LinkedIn.
+ * UI récente : lien profil texte avec p[0]=nom, p[1]=headline.
+ */
+export function extractTitlesFromConnectionCard(
+  card: HTMLElement,
+  name: string
+): ConnectionTitleExtraction {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  let confidentTitle: string | undefined;
+
+  const push = (raw: string | null | undefined, confident = false): void => {
+    if (!raw) return;
+    const cleaned = cleanJobTitle(raw.replace(/\s+/g, " "));
+    if (cleaned.length < 2 || cleaned.length > 180) return;
+    if (isLikelyConnectionDateText(cleaned)) return;
+    if (isConnectionUiNoiseLine(cleaned)) return;
+    if (normalizeNameCompare(cleaned) === normalizeNameCompare(name)) return;
+    // Filtre doux : garder plus de candidats que isBadJobTitleCandidate
+    if (/^(voir|see|http|linkedin)/i.test(cleaned)) return;
+
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(cleaned);
+    if (confident && !confidentTitle) confidentTitle = cleaned;
+  };
+
+  // A) Occupation / headline dédiés
+  for (const sel of [
+    ".mn-connection-card__occupation",
+    "[class*='mn-connection-card__occupation']",
+    "[class*='occupation']",
+    "[data-anonymize='headline']",
+    "[class*='headline']",
+  ]) {
+    for (const el of Array.from(card.querySelectorAll<HTMLElement>(sel))) {
+      if (el.closest("[class*='connection-date'], time, button")) continue;
+      push(el.textContent, true);
+    }
+  }
+
+  // B) Lien profil texte (pas la photo) : p[0] nom, p[1] titre — structure LinkedIn 2025/2026
+  const profileLinks = Array.from(
+    card.querySelectorAll<HTMLAnchorElement>('a[href*="/in/"]')
+  ).filter((a) => {
+    const style = a.getAttribute("style") ?? "";
+    // La vignette photo a souvent height/width en inline style
+    if (/height\s*:|width\s*:/i.test(style)) return false;
+    return true;
+  });
+
+  for (const link of profileLinks) {
+    const paragraphs = Array.from(link.querySelectorAll("p"));
+    if (paragraphs.length >= 2) {
+      push(paragraphs[1].textContent, true);
+      for (let i = 2; i < paragraphs.length; i++) push(paragraphs[i].textContent);
+    }
+
+    // Parfois des div/span au lieu de p
+    const blocks = Array.from(link.children).filter(
+      (el): el is HTMLElement => el instanceof HTMLElement
+    );
+    if (blocks.length >= 2) {
+      push(blocks[1].textContent, !confidentTitle);
+    }
+  }
+
+  // C) Tous les nœuds texte feuille de la carte (filet large)
+  const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+  let node: Node | null = walker.nextNode();
+  while (node) {
+    const parent = node.parentElement;
+    if (parent) {
+      if (parent.closest("button, [role='button'], a[href*='messaging'], script, style, time")) {
+        node = walker.nextNode();
+        continue;
+      }
+    }
+    const text = (node.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (text.length >= 3) push(text);
+    node = walker.nextNode();
+  }
+
+  // D) innerText lignes
+  const lines = (card.innerText || "")
+    .split(/\n+/)
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const nameNorm = normalizeNameCompare(name);
+  const nameIdx = lines.findIndex(
+    (l) =>
+      normalizeNameCompare(l) === nameNorm ||
+      (nameNorm.length >= 3 && normalizeNameCompare(l).includes(nameNorm))
+  );
+  const dateIdx = lines.findIndex((l) => isLikelyConnectionDateText(l));
+  const start = nameIdx >= 0 ? nameIdx + 1 : 0;
+  const end = dateIdx > start ? dateIdx : Math.min(lines.length, start + 4);
+  for (let i = start; i < end; i++) push(lines[i]);
+
+  return {
+    confidentTitle,
+    candidates: candidates.slice(0, 10),
+  };
+}
+
+export interface ConnectionEntry {
+  name: string;
+  profileUrl: string;
+  jobTitle?: string;
+  jobTitleCandidates?: string[];
+  profilePicture?: string;
+}
+
+function clickConnectionsLoadMore(): boolean {
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>("button, [role='button']")
+  );
+  for (const el of candidates) {
+    const label = (el.innerText || el.textContent || el.getAttribute("aria-label") || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (
+      label === "afficher plus" ||
+      label === "voir plus" ||
+      label === "load more" ||
+      label === "show more" ||
+      label.startsWith("afficher plus") ||
+      label.startsWith("load more")
+    ) {
+      el.click();
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Scroll + load more ; collecte au fur et à mesure (liste virtualisée LinkedIn). */
+export async function collectConnectionsFromPage(
+  options: {
+    maxScrolls?: number;
+    /** Si fourni, arrêt dès que toutes ces URLs sont trouvées. */
+    targetUrls?: string[];
+  } = {}
+): Promise<ConnectionEntry[]> {
+  const maxScrolls = options.maxScrolls ?? 12;
+  const targets = new Set(
+    (options.targetUrls ?? []).map((url) => profileUrlFromHref(url) ?? url.replace(/\/$/, ""))
+  );
+
+  const byUrl = new Map<string, ConnectionEntry>();
+
+  const harvest = (): void => {
+    for (const entry of parseConnectionsFromPage()) {
+      const prev = byUrl.get(entry.profileUrl);
+      if (!prev) {
+        byUrl.set(entry.profileUrl, entry);
+        continue;
+      }
+      const mergedCandidates = [
+        ...(prev.jobTitleCandidates ?? []),
+        ...(entry.jobTitleCandidates ?? []),
+      ];
+      const uniqueCandidates = Array.from(
+        new Map(mergedCandidates.map((t) => [t.toLowerCase(), t])).values()
+      ).slice(0, 10);
+
+      const hasConfidentTitle = !!entry.jobTitle && !(entry.jobTitleCandidates?.length);
+      byUrl.set(entry.profileUrl, {
+        ...prev,
+        name: entry.name || prev.name,
+        profilePicture: entry.profilePicture || prev.profilePicture,
+        jobTitle: entry.jobTitle || prev.jobTitle,
+        jobTitleCandidates: hasConfidentTitle
+          ? undefined
+          : uniqueCandidates.length > 0
+            ? uniqueCandidates
+            : prev.jobTitleCandidates,
+      });
+    }
+  };
+
+  const allTargetsFound = (): boolean => {
+    if (targets.size === 0) return false;
+    let found = 0;
+    for (const url of targets) {
+      if (byUrl.has(url)) found++;
+    }
+    return found >= targets.size;
+  };
+
+  harvest();
+  if (allTargetsFound()) return Array.from(byUrl.values());
+
+  let lastCount = byUrl.size;
   let stableRounds = 0;
 
   for (let i = 0; i < maxScrolls; i++) {
+    // Préférer "Afficher plus" (moins brutal qu'un scroll infini)
+    const loadedMore = clickConnectionsLoadMore();
+
     const preferred =
       document.querySelector<HTMLElement>(".scaffold-finite-scroll__content") ??
       document.querySelector<HTMLElement>("[class*='scaffold-finite-scroll']") ??
@@ -1271,62 +1556,115 @@ export async function scrollConnectionsList(maxScrolls = 35): Promise<void> {
       findNearestScrollable(document.body) ||
       document.documentElement;
 
+    // Scroll progressif (~1 viewport), pas un jump en bas à chaque tour
+    const step = Math.max(Math.floor(scrollRoot.clientHeight * 0.85), 400);
     if (scrollRoot === document.documentElement || scrollRoot === document.body) {
-      window.scrollTo(0, document.body.scrollHeight);
+      window.scrollBy(0, step);
     } else {
-      scrollRoot.scrollTop = scrollRoot.scrollHeight;
+      scrollRoot.scrollBy({ top: step, behavior: "instant" as ScrollBehavior });
       scrollRoot.dispatchEvent(new Event("scroll", { bubbles: true }));
-      window.scrollTo(0, document.body.scrollHeight);
     }
 
-    requestPageBridgeScroll(scrollRoot);
-    await sleep(900);
+    await sleep(loadedMore ? 700 : 500);
+    harvest();
 
-    const currentCount = document.querySelectorAll(
-      "a[data-control-name='connection_profile'], a[href*='/in/'][data-control-name*='connection']"
-    ).length;
+    if (allTargetsFound()) break;
 
-    if (currentCount <= lastCount) {
+    if (byUrl.size <= lastCount) {
       stableRounds++;
-      if (stableRounds >= 3) break;
+      if (stableRounds >= 2) break;
     } else {
       stableRounds = 0;
-      lastCount = currentCount;
+      lastCount = byUrl.size;
     }
   }
+
+  harvest();
+  return Array.from(byUrl.values());
 }
 
-export function parseConnectionsFromPage(): Array<{ name: string; profileUrl: string }> {
-  const results: Array<{ name: string; profileUrl: string }> = [];
+/** Scroll la liste de connexions (conteneur scrollable LinkedIn) */
+export async function scrollConnectionsList(maxScrolls = 12): Promise<void> {
+  await collectConnectionsFromPage({ maxScrolls });
+}
+
+export function parseConnectionsFromPage(): ConnectionEntry[] {
+  const results: ConnectionEntry[] = [];
   const seen = new Set<string>();
 
-  const add = (href: string, name: string): void => {
-    const profileUrl = profileUrlFromHref(href);
+  const addFromCard = (card: HTMLElement, anchor: HTMLAnchorElement): void => {
+    if (!anchor.href || anchor.href.includes("/company/")) return;
+    const profileUrl = profileUrlFromHref(anchor.href);
     if (!profileUrl || seen.has(profileUrl)) return;
 
-    const cleanName = name.trim().replace(/\s+/g, " ");
-    if (!cleanName || cleanName.length < 2 || cleanName.length > 80) return;
-    if (/^(voir|view|message|plus|more)$/i.test(cleanName)) return;
+    // Nom : 1er <p> du lien texte, sinon sélecteurs classiques
+    const textLink =
+      Array.from(card.querySelectorAll<HTMLAnchorElement>('a[href*="/in/"]')).find((a) => {
+        const style = a.getAttribute("style") ?? "";
+        return !/height\s*:|width\s*:/i.test(style);
+      }) ?? anchor;
+
+    const firstP = textLink.querySelector("p");
+    let name = (firstP?.textContent ?? "").trim().replace(/\s+/g, " ");
+    if (!name || name.length < 2 || name.length > 80) {
+      const nameEl =
+        card.querySelector<HTMLElement>(
+          ".mn-connection-card__name, [class*='mn-connection-card__name']"
+        ) ?? card.querySelector<HTMLElement>("span[aria-hidden='true']");
+      name = (nameEl?.textContent ?? "").trim().replace(/\s+/g, " ");
+    }
+    if (!name || name.length < 2) {
+      name = nameFromConnectionAnchor(anchor).trim().replace(/\s+/g, " ");
+    }
+    if (name.includes("\n")) name = name.split("\n")[0].trim();
+    if (!name || name.length < 2 || name.length > 80) return;
+    if (/^(voir|view|message|plus|more)$/i.test(name)) return;
+
+    const extracted = extractTitlesFromConnectionCard(card, name);
+    const profilePicture = profilePictureFromConnectionCard(card);
+
+    // Confident → jobTitle ; toujours garder candidates pour choix sur la card
+    const jobTitle = extracted.confidentTitle;
+    let candidates = extracted.candidates;
+    if (jobTitle && !candidates.some((c) => c.toLowerCase() === jobTitle.toLowerCase())) {
+      candidates = [jobTitle, ...candidates];
+    }
+    // Si pas de confident mais des candidats → choix manuel (même 1 seul)
+    const needsChoice = !jobTitle && candidates.length >= 1;
 
     seen.add(profileUrl);
-    results.push({ name: cleanName, profileUrl });
+    results.push({
+      name,
+      profileUrl,
+      jobTitle,
+      jobTitleCandidates: needsChoice || candidates.length > 1 ? candidates.slice(0, 10) : undefined,
+      profilePicture,
+    });
   };
 
-  for (const anchor of Array.from(
-    document.querySelectorAll<HTMLAnchorElement>(
-      "a[data-control-name='connection_profile'], a[href*='/in/'][data-control-name*='connection']"
+  // Cartes UI récente (lazy-column / componentkey)
+  for (const card of Array.from(
+    document.querySelectorAll<HTMLElement>(
+      [
+        '[data-testid="lazy-column"] [componentkey]',
+        "[data-display-contents='true'] > [componentkey]",
+        ".mn-connection-card",
+        "li.mn-connection-card",
+        "li.artdeco-list__item",
+      ].join(", ")
     )
   )) {
-    if (!anchor.href) continue;
-    add(anchor.href, nameFromConnectionAnchor(anchor));
+    const anchor = card.querySelector<HTMLAnchorElement>('a[href*="/in/"]');
+    if (anchor) addFromCard(card, anchor);
   }
 
+  // Filet : tous les liens profil
   const searchRoot = document.querySelector("main") ?? document.body;
   for (const anchor of Array.from(searchRoot.querySelectorAll<HTMLAnchorElement>("a[href*='/in/']"))) {
     if (!anchor.href || anchor.href.includes("/company/")) continue;
     const path = anchor.pathname;
     if (!/^\/in\/[^/]+\/?$/.test(path)) continue;
-    add(anchor.href, nameFromConnectionAnchor(anchor));
+    addFromCard(connectionCardFromAnchor(anchor), anchor);
   }
 
   return results;

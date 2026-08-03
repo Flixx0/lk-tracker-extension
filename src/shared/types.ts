@@ -20,6 +20,8 @@ export interface Prospect {
   profileUrl: string;
   profilePicture?: string;
   jobTitle?: string;
+  /** Titres ambigus détectés à la sync — choix manuel dans le popup. */
+  jobTitleCandidates?: string[];
   status: ProspectStatus;
   invitationSentAt?: string;
   connectionAcceptedAt?: string;
