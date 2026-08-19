@@ -27,11 +27,13 @@ export function ProspectDrawer({
     const rawType = String(data.get("firstMessageType") ?? "");
     const firstMessageType: FirstMessageType | null =
       rawType === "video" || rawType === "text" ? rawType : null;
+    const replied = data.get("replied") !== null;
     await onSave({
       status,
       jobTitle: jobTitle || null,
       notes: notes || null,
       firstMessageType,
+      replied,
       invitationSentAt: dateInputToIso(String(data.get("invitationSentAt") ?? ""), prospect.invitationSentAt),
       connectionAcceptedAt: dateInputToIso(
         String(data.get("connectionAcceptedAt") ?? ""),
@@ -134,6 +136,15 @@ export function ProspectDrawer({
               <option value="video">Vidéo</option>
               <option value="text">Texte</option>
             </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              name="replied"
+              defaultChecked={prospect.replied ?? false}
+              className="h-4 w-4 rounded border-line text-accent focus:ring-accent/20"
+            />
+            A répondu
           </label>
           <DateField name="followUpDate" label="Date de relance" value={prospect.followUpDate} />
           <DateField name="followUpSentAt" label="Relance envoyée" value={prospect.followUpSentAt} />

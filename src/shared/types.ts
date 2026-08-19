@@ -42,6 +42,8 @@ export interface Prospect {
   /** Titres ambigus détectés à la sync — choix manuel dans le popup. */
   jobTitleCandidates?: string[];
   status: ProspectStatus;
+  /** Indique si le prospect a répondu (checkbox manuelle dans le CMS). */
+  replied?: boolean;
   /** Type du premier message envoyé (vidéo ou texte). */
   firstMessageType?: FirstMessageType;
   invitationSentAt?: string;

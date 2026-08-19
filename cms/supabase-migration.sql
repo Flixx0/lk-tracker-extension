@@ -4,3 +4,6 @@ alter table public.prospects
 alter table public.prospects
   add column if not exists notes text;
 
+alter table public.prospects
+  add column if not exists replied boolean not null default false;
+

@@ -47,6 +47,8 @@ export interface Prospect {
   jobTitleCandidates?: string[];
   status: ProspectStatus;
   firstMessageType?: FirstMessageType;
+  /** Indique si le prospect a répondu (checkbox manuelle dans le CMS). */
+  replied?: boolean;
   invitationSentAt?: string;
   connectionAcceptedAt?: string;
   messageSentAt?: string;
@@ -66,6 +68,7 @@ export interface DbRow {
   job_title_candidates: string[] | null;
   status: string;
   first_message_type?: string | null;
+  replied?: boolean | null;
   invitation_sent_at: string | null;
   connection_accepted_at: string | null;
   message_sent_at: string | null;
@@ -107,6 +110,7 @@ export interface ProspectPatch {
   jobTitle?: string | null;
   status?: ProspectStatus;
   firstMessageType?: FirstMessageType | null;
+  replied?: boolean;
   invitationSentAt?: string | null;
   connectionAcceptedAt?: string | null;
   messageSentAt?: string | null;

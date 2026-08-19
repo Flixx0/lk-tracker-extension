@@ -164,6 +164,7 @@ export function ProspectCms() {
       "Profil",
       "Statut",
       "Type 1er message",
+      "A répondu",
       "Invitation",
       "Connexion",
       "Message",
@@ -179,6 +180,7 @@ export function ProspectCms() {
         p.profileUrl,
         p.status,
         p.firstMessageType === "video" ? "vidéo" : p.firstMessageType === "text" ? "texte" : "",
+        p.replied ? "oui" : "",
         p.invitationSentAt ?? "",
         p.connectionAcceptedAt ?? "",
         p.messageSentAt ?? "",
@@ -376,6 +378,7 @@ export function ProspectCms() {
                       })
                     }
                     onStatusChange={(p, status) => void save(p.id, { status })}
+                    onRepliedChange={(p, replied) => void save(p.id, { replied })}
                   />
                 )}
                 <p className="text-xs text-muted">{filtered.length} résultat{filtered.length === 1 ? "" : "s"}</p>

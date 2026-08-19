@@ -29,6 +29,7 @@ export function ProspectTable({
   onMarkMessage,
   onMarkFollowUp,
   onStatusChange,
+  onRepliedChange,
 }: {
   prospects: Prospect[];
   sortKey: SortKey;
@@ -40,6 +41,7 @@ export function ProspectTable({
   onMarkMessage: (prospect: Prospect) => void;
   onMarkFollowUp: (prospect: Prospect) => void;
   onStatusChange: (prospect: Prospect, status: ProspectStatus) => void;
+  onRepliedChange: (prospect: Prospect, replied: boolean) => void;
 }) {
   return (
     <div className="overflow-auto rounded-2xl border border-line bg-panel">
@@ -64,6 +66,7 @@ export function ProspectTable({
                 </button>
               </th>
             ))}
+            <th className="border-b border-line px-3 py-2.5 font-medium">A répondu</th>
             <th className="border-b border-line px-3 py-2.5 font-medium">Actions</th>
           </tr>
         </thead>
@@ -133,6 +136,17 @@ export function ProspectTable({
                   ) : (
                     <span className="text-muted">—</span>
                   )}
+                </td>
+                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                  <label className="inline-flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={!!p.replied}
+                      onChange={(e) => onRepliedChange(p, e.target.checked)}
+                      aria-label={`A répondu : ${p.name}`}
+                      className="h-4 w-4 rounded border-line text-accent focus:ring-accent/20"
+                    />
+                  </label>
                 </td>
                 <td className="px-3 py-2.5">
                   <DateCell iso={p.followUpDate} warn={due} />

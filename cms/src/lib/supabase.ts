@@ -80,6 +80,7 @@ export function rowToProspect(row: DbRow): Prospect {
     jobTitle: row.job_title ?? undefined,
     jobTitleCandidates: row.job_title_candidates ?? undefined,
     status: row.status as Prospect["status"],
+    replied: row.replied ?? undefined,
     firstMessageType: parseMessageType(row.first_message_type),
     invitationSentAt: row.invitation_sent_at ?? undefined,
     connectionAcceptedAt: row.connection_accepted_at ?? undefined,
@@ -127,6 +128,7 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
   if (patch.name !== undefined) dbPatch.name = patch.name;
   if (patch.jobTitle !== undefined) dbPatch.job_title = patch.jobTitle;
   if (patch.status !== undefined) dbPatch.status = patch.status;
+  if (patch.replied !== undefined) dbPatch.replied = patch.replied;
   if (patch.firstMessageType !== undefined) dbPatch.first_message_type = patch.firstMessageType;
   if (patch.invitationSentAt !== undefined) dbPatch.invitation_sent_at = patch.invitationSentAt;
   if (patch.connectionAcceptedAt !== undefined)
@@ -145,7 +147,7 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
       body: JSON.stringify(body),
     });
 
-  const optionalColumns = ["follow_up_sent_at", "first_message_type", "notes"];
+  const optionalColumns = ["follow_up_sent_at", "first_message_type", "notes", "replied"];
   let body: Record<string, unknown> = dbPatch;
   let rows: DbRow[] | undefined;
 
