@@ -1,4 +1,7 @@
-import { waitForMessagingList } from "../shared/linkedin-dom";
+import {
+  collectMessagingParticipantsForSync,
+  waitForMessagingList,
+} from "../shared/linkedin-dom";
 import { isExtensionContextValid } from "../shared/extension-context";
 import { logActivity } from "../shared/log-activity";
 import { sendToBackground } from "../shared/messaging";
@@ -106,15 +109,89 @@ async function syncMessages(mode: MessagesSyncMode = "all"): Promise<void> {
 
     showSyncBanner(`LK Tracker — Sync messages (${modeLabel})…`);
     await logActivity(`Sync messages (${modeLabel})…`, "LK Tracker", false, true);
-    console.log("[LK Tracker] Sync messages via Voyager API, mode:", mode);
+    console.log("[LK Tracker] Sync messages via DOM (vérif message sortant), mode:", mode);
 
-    // Attendre que la page /messaging soit chargée (pour que les cookies soient actifs)
-    await waitForMessagingList(10000).catch(() => {});
+    const listReady = await waitForMessagingList(18000);
+    if (!listReady) {
+      console.warn("[LK Tracker] Liste messages introuvable dans le DOM");
+      hideSyncBanner("Aucune conversation trouvée", true);
+      await logActivity(
+        "Aucune conversation trouvée — ouvre /messaging et réessaie",
+        "LK Tracker — sync",
+        true
+      );
+      return;
+    }
 
-    // Le service worker fait l'appel Voyager API directement (plus fiable que le DOM)
-    const result = await sendToBackground<{ updated: number; apiError?: string }>({
+    const allProspects = (await sendToBackground<Prospect[]>({ type: "GET_PROSPECTS" })) ?? [];
+
+    const targetProspects =
+      mode === "all"
+        ? allProspects
+        : allProspects.filter((p) => {
+            const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+            if (p.messageSentAt && new Date(p.messageSentAt).getTime() >= cutoff) return true;
+            if (p.connectionAcceptedAt && new Date(p.connectionAcceptedAt).getTime() >= cutoff) return true;
+            if (!p.messageSentAt && new Date(p.createdAt).getTime() >= cutoff) return true;
+            return false;
+          });
+
+    console.log(
+      `[LK Tracker] ${targetProspects.length}/${allProspects.length} prospects ciblés (mode: ${mode})`
+    );
+
+    const normalizePersonName = (name: string): string =>
+      name
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const targetNames = new Set(targetProspects.map((p) => normalizePersonName(p.name)));
+    const targetUrls = new Set(targetProspects.map((p) => p.profileUrl));
+
+    const collected = await collectMessagingParticipantsForSync({
+      maxThreadOpens: 30,
+      maxScrolls: mode === "week" ? 8 : 20,
+      targetNames,
+      targetUrls,
+    });
+
+    // On ne veut QUE les threads où on détecte un message sortant de toi.
+    const byUrl = new Map<
+      string,
+      { name: string; profileUrl: string; firstMessageType?: "video" | "text" }
+    >();
+    for (const item of collected) {
+      const existing = byUrl.get(item.profileUrl);
+      // Préférer une détection explicite du type (video/text)
+      if (!existing || (!existing.firstMessageType && item.firstMessageType)) {
+        byUrl.set(item.profileUrl, item);
+      }
+    }
+
+    const threads = Array.from(byUrl.values()).filter((t) => !!t.firstMessageType);
+    console.log(`[LK Tracker] ${threads.length} conversations valides à sync (message sortant détecté)`);
+
+    if (threads.length === 0) {
+      hideSyncBanner("0 prospect à mettre à jour (message sortant introuvable)", true);
+      await logActivity(
+        "0 prospect à mettre à jour — aucun message sortant détecté",
+        "LK Tracker — sync",
+        true
+      );
+      void sendToBackground({
+        type: "MESSAGES_SYNC_DONE",
+        payload: { updated: 0 },
+      });
+      return;
+    }
+
+    const result = await sendToBackground<{ updated: number }>({
       type: "SYNC_MESSAGES",
-      payload: { mode },
+      payload: threads,
     });
 
     if (!result) {
@@ -123,17 +200,11 @@ async function syncMessages(mode: MessagesSyncMode = "all"): Promise<void> {
       return;
     }
 
-    if (result.apiError) {
-      hideSyncBanner(`Erreur API: ${result.apiError}`, true);
-      await logActivity(`Sync messages erreur: ${result.apiError}`, "LK Tracker — erreur", true);
-      return;
-    }
-
     console.log(`[LK Tracker] ${result.updated} prospects mis à jour (message envoyé)`);
 
     hideSyncBanner(`✓ Sync messages : ${result.updated} prospect(s) mis à jour`);
     await logActivity(
-      `Sync messages : ${result.updated} prospect(s) → message envoyé`,
+      `Sync messages : ${result.updated} prospect(s) → message envoyé (sortant vérifié)`,
       "LK Tracker — sync"
     );
 

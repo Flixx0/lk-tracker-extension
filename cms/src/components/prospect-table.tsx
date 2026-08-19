@@ -78,9 +78,27 @@ export function ProspectTable({
               >
                 <td className="px-3 py-2.5">
                   <div className="flex items-center gap-3">
-                    <Avatar name={p.name} src={p.profilePicture} />
+                    <a
+                      href={p.profileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="shrink-0"
+                      aria-label={`Ouvrir LinkedIn de ${p.name}`}
+                      title={`Ouvrir LinkedIn de ${p.name}`}
+                    >
+                      <Avatar name={p.name} src={p.profilePicture} />
+                    </a>
                     <div className="min-w-0">
-                      <div className="truncate font-medium">{p.name}</div>
+                      <a
+                        href={p.profileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="truncate font-medium hover:underline"
+                      >
+                        {p.name}
+                      </a>
                       <div className="truncate text-xs text-muted">{p.jobTitle || "—"}</div>
                     </div>
                   </div>
