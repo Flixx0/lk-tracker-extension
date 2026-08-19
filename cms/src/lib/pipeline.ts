@@ -22,7 +22,11 @@ export function matchesMessageType(p: Prospect, scope: MessageTypeScope): boolea
 }
 
 export function isFollowUpDue(p: Prospect, now = new Date()): boolean {
-  if (p.status === PROSPECT_STATUSES.FOLLOW_UP_PENDING) {
+  if (
+    p.status === PROSPECT_STATUSES.FOLLOW_UP_PENDING ||
+    p.status === PROSPECT_STATUSES.FIRST_FOLLOW_UP ||
+    p.status === PROSPECT_STATUSES.SECOND_FOLLOW_UP
+  ) {
     if (p.followUpDate) return isOnOrBefore(p.followUpDate, now);
     return true;
   }
@@ -137,6 +141,7 @@ export function searchProspects(prospects: Prospect[], query: string): Prospect[
       (p.jobTitle ?? "").toLowerCase().includes(q) ||
       p.profileUrl.toLowerCase().includes(q) ||
       p.status.toLowerCase().includes(q) ||
+      (p.notes ?? "").toLowerCase().includes(q) ||
       (p.firstMessageType === "video" && (q === "video" || q === "vidéo")) ||
       (p.firstMessageType === "text" && (q === "text" || q === "texte"))
     );

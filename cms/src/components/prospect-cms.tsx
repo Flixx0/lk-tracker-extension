@@ -115,7 +115,11 @@ export function ProspectCms() {
       const data = (await res.json()) as { prospect?: Prospect; error?: string };
       if (!res.ok || !data.prospect) throw new Error(data.error ?? "Mise à jour impossible");
       setProspects((list) => list.map((p) => (p.id === id ? data.prospect! : p)));
-      setToast("Prospect mis à jour");
+      if (patch.notes !== undefined && (data.prospect.notes ?? "") !== (patch.notes ?? "")) {
+        setToast("Notes non enregistrées — exécute cms/supabase-migration.sql dans Supabase");
+      } else {
+        setToast("Prospect mis à jour");
+      }
     } catch (err) {
       setToast(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -160,6 +164,7 @@ export function ProspectCms() {
       "Message",
       "Relance",
       "Relance envoyée",
+      "Notes",
       "Créé",
     ];
     const lines = filtered.map((p) =>
@@ -174,6 +179,7 @@ export function ProspectCms() {
         p.messageSentAt ?? "",
         p.followUpDate ?? "",
         p.followUpSentAt ?? "",
+        p.notes ?? "",
         p.createdAt,
       ]
         .map(csvCell)
@@ -190,8 +196,8 @@ export function ProspectCms() {
   }
 
   return (
-    <div className="flex min-h-full">
-      <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col bg-sidebar text-stone-200">
+    <div className="flex h-dvh overflow-hidden">
+      <aside className="flex h-full w-56 shrink-0 flex-col bg-sidebar text-stone-200">
         <div className="px-5 py-6">
           <p className="text-[11px] font-semibold tracking-[0.22em] text-teal-300 uppercase">LK Tracker</p>
           <h1 className="mt-1 text-lg font-semibold text-white">Prospection</h1>
@@ -215,8 +221,8 @@ export function ProspectCms() {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex flex-wrap items-center gap-3 border-b border-line px-6 py-4">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-6 py-4">
           <div className="relative min-w-56 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
             <input
@@ -246,7 +252,7 @@ export function ProspectCms() {
           ) : null}
         </header>
 
-        <main className="flex min-h-0 flex-1">
+        <main className="flex min-h-0 flex-1 overflow-hidden">
           <section className="min-w-0 flex-1 overflow-y-auto p-6">
             {error ? (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">{error}</div>
@@ -320,7 +326,7 @@ export function ProspectCms() {
 
                 {tab === "follow_up" ? (
                   <p className="text-sm text-muted">
-                    Relances dont la date est arrivée (ou statut « relance à faire »). Les lignes en rose sont dues.
+                    Relances dont la date est arrivée (1ère/2ème relance). Les lignes en rose sont dues.
                   </p>
                 ) : null}
                 {tab === "to_contact" ? (
@@ -371,10 +377,20 @@ export function ProspectCms() {
 
           {selected && view === "pipeline" ? (
             <>
-              <div className="hidden w-[380px] shrink-0 xl:block">
-                <div className="sticky top-0 h-screen">
+              <div className="hidden h-full min-h-0 w-[380px] shrink-0 xl:flex">
+                <ProspectDrawer
+                  key={selected.id}
+                  prospect={selected}
+                  busy={busy}
+                  onClose={() => setSelectedId(undefined)}
+                  onSave={(patch) => save(selected.id, patch)}
+                  onDelete={() => remove(selected.id)}
+                />
+              </div>
+              <div className="fixed inset-0 z-30 flex justify-end bg-black/40 xl:hidden">
+                <div className="h-full w-full max-w-md">
                   <ProspectDrawer
-                    key={selected.id}
+                    key={`m-${selected.id}`}
                     prospect={selected}
                     busy={busy}
                     onClose={() => setSelectedId(undefined)}
@@ -382,16 +398,6 @@ export function ProspectCms() {
                     onDelete={() => remove(selected.id)}
                   />
                 </div>
-              </div>
-              <div className="fixed inset-0 z-30 flex justify-end bg-black/40 xl:hidden">
-                <ProspectDrawer
-                  key={`m-${selected.id}`}
-                  prospect={selected}
-                  busy={busy}
-                  onClose={() => setSelectedId(undefined)}
-                  onSave={(patch) => save(selected.id, patch)}
-                  onDelete={() => remove(selected.id)}
-                />
               </div>
             </>
           ) : null}

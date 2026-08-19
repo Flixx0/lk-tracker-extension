@@ -29,6 +29,8 @@ export function computeStats(prospects: Prospect[]) {
     connecte: 0,
     message_envoye: 0,
     relance_a_faire: 0,
+    "1ere_relance": 0,
+    "2eme_relance": 0,
     pas_interesse: 0,
   };
 
@@ -153,7 +155,9 @@ export function computeStats(prospects: Prospect[]) {
       Boolean(p.connectionAcceptedAt) ||
       p.status === "connecte" ||
       p.status === "message_envoye" ||
-      p.status === "relance_a_faire"
+      p.status === "relance_a_faire" ||
+      p.status === "1ere_relance" ||
+      p.status === "2eme_relance"
   ).length;
   const invited = prospects.filter(
     (p) => Boolean(p.invitationSentAt) || isInvitationPending(p) || Boolean(p.connectionAcceptedAt)

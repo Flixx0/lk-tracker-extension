@@ -86,6 +86,7 @@ export function rowToProspect(row: DbRow): Prospect {
     messageSentAt: row.message_sent_at ?? undefined,
     followUpDate: row.follow_up_date ?? undefined,
     followUpSentAt: row.follow_up_sent_at ?? undefined,
+    notes: row.notes ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -133,6 +134,7 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
   if (patch.messageSentAt !== undefined) dbPatch.message_sent_at = patch.messageSentAt;
   if (patch.followUpDate !== undefined) dbPatch.follow_up_date = patch.followUpDate;
   if (patch.followUpSentAt !== undefined) dbPatch.follow_up_sent_at = patch.followUpSentAt;
+  if (patch.notes !== undefined) dbPatch.notes = patch.notes;
 
   const send = (body: Record<string, unknown>) =>
     request<DbRow[]>("prospects", {
@@ -141,25 +143,23 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
       body: JSON.stringify(body),
     });
 
-  let rows: DbRow[];
-  try {
-    rows = await send(dbPatch);
-  } catch (err) {
-    if (patch.followUpSentAt !== undefined && isUnknownColumnError(err, "follow_up_sent_at")) {
-      const { follow_up_sent_at: _ignored, ...rest } = dbPatch;
-      rows = await send(rest);
-    } else if (
-      patch.firstMessageType !== undefined &&
-      isUnknownColumnError(err, "first_message_type")
-    ) {
-      const { first_message_type: _ignored, ...rest } = dbPatch;
-      rows = await send(rest);
-    } else {
-      throw err;
+  const optionalColumns = ["follow_up_sent_at", "first_message_type", "notes"];
+  let body: Record<string, unknown> = dbPatch;
+  let rows: DbRow[] | undefined;
+
+  for (let i = 0; i < optionalColumns.length + 1; i++) {
+    try {
+      rows = await send(body);
+      break;
+    } catch (err) {
+      const unknown = optionalColumns.find((col) => col in body && isUnknownColumnError(err, col));
+      if (!unknown) throw err;
+      const { [unknown]: _ignored, ...rest } = body;
+      body = rest;
     }
   }
 
-  if (rows.length === 0) {
+  if (!rows || rows.length === 0) {
     throw new SupabaseError(404, "Prospect introuvable");
   }
   return rowToProspect(rows[0]);

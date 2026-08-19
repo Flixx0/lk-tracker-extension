@@ -23,12 +23,14 @@ export function ProspectDrawer({
     const data = new FormData(form);
     const status = String(data.get("status")) as ProspectStatus;
     const jobTitle = String(data.get("jobTitle") ?? "").trim();
+    const notes = String(data.get("notes") ?? "").trim();
     const rawType = String(data.get("firstMessageType") ?? "");
     const firstMessageType: FirstMessageType | null =
       rawType === "video" || rawType === "text" ? rawType : null;
     await onSave({
       status,
       jobTitle: jobTitle || null,
+      notes: notes || null,
       firstMessageType,
       invitationSentAt: dateInputToIso(String(data.get("invitationSentAt") ?? ""), prospect.invitationSentAt),
       connectionAcceptedAt: dateInputToIso(
@@ -42,8 +44,8 @@ export function ProspectDrawer({
   }
 
   return (
-    <aside className="flex h-full w-full max-w-md flex-col border-l border-line bg-panel">
-      <div className="flex items-start justify-between gap-3 border-b border-line p-5">
+    <aside className="flex h-full min-h-0 w-full max-w-md flex-col overflow-hidden border-l border-line bg-panel">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line p-5">
         <div className="flex min-w-0 items-start gap-3">
           <Avatar name={prospect.name} src={prospect.profilePicture} size="lg" />
           <div className="min-w-0">
@@ -72,7 +74,7 @@ export function ProspectDrawer({
           await saveDates(e.currentTarget);
         }}
       >
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
           <a
             href={prospect.profileUrl}
             target="_blank"
@@ -99,12 +101,23 @@ export function ProspectDrawer({
               defaultValue={prospect.status}
               className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 text-sm outline-none ring-accent/20 focus:ring-4"
             >
-              {STATUS_ORDER.map((s) => (
+              {[...STATUS_ORDER, ...(STATUS_ORDER.includes(prospect.status) ? [] : [prospect.status])].map((s) => (
                 <option key={s} value={s}>
                   {STATUS_LABELS[s]}
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="text-sm font-medium">
+            Notes
+            <textarea
+              name="notes"
+              defaultValue={prospect.notes ?? ""}
+              rows={5}
+              placeholder="Contexte, relance, réponse, prochaine action…"
+              className="mt-1 min-h-28 w-full resize-y rounded-xl border border-line bg-white px-3 py-2 text-sm leading-relaxed outline-none ring-accent/20 focus:ring-4"
+            />
           </label>
 
           <DateField name="invitationSentAt" label="Invitation envoyée" value={prospect.invitationSentAt} />
@@ -130,7 +143,7 @@ export function ProspectDrawer({
           </p>
         </div>
 
-        <div className="flex gap-2 border-t border-line p-4">
+        <div className="flex shrink-0 gap-2 border-t border-line bg-panel p-4">
           <button
             type="submit"
             disabled={busy}

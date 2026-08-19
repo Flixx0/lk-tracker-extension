@@ -27,7 +27,11 @@ const STATUS_RANK: Record<ProspectStatus, number> = {
   invitation_envoyee: 1,
   connecte: 2,
   message_envoye: 3,
-  relance_a_faire: 3,
+  // Legacy + 1ère relance
+  relance_a_faire: 4,
+  "1ere_relance": 4,
+  // 2ème relance
+  "2eme_relance": 5,
   pas_interesse: 0,
 };
 

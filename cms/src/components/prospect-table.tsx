@@ -100,6 +100,11 @@ export function ProspectTable({
                         {p.name}
                       </a>
                       <div className="truncate text-xs text-muted">{p.jobTitle || "—"}</div>
+                      {p.notes?.trim() ? (
+                        <div className="mt-0.5 truncate text-[11px] text-stone-500" title={p.notes}>
+                          {p.notes}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </td>

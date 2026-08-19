@@ -1,5 +1,5 @@
 import type { AppSettings, DetectedProfile, ExtensionMessage, FirstMessageType, Prospect, ProspectStatus } from "../shared/types";
-import { PROSPECT_STATUSES, STATUS_LABELS } from "../shared/types";
+import { PROSPECT_STATUSES, STATUS_LABELS, STATUS_ORDER } from "../shared/types";
 import { formatProfileForAi } from "../shared/profile-ai-export";
 
 function sendMessage<T>(message: ExtensionMessage): Promise<T> {
@@ -430,7 +430,10 @@ function createProspectListItem(
   const statusSelect = document.createElement("select");
   statusSelect.className = "prospect-status-select";
   statusSelect.title = "Changer le statut";
-  for (const [, value] of Object.entries(PROSPECT_STATUSES)) {
+  const statusOptions = STATUS_ORDER.includes(prospect.status)
+    ? STATUS_ORDER
+    : [...STATUS_ORDER, prospect.status];
+  for (const value of statusOptions) {
     const opt = document.createElement("option");
     opt.value = value;
     opt.textContent = STATUS_LABELS[value] ?? value;
@@ -505,13 +508,11 @@ function renderStats(prospects: Prospect[]): void {
     }
   }
 
-  const statusLines = Object.entries(PROSPECT_STATUSES)
-    .map(([, val]) => {
-      const count = byStatus[val] ?? 0;
-      const label = STATUS_LABELS[val] ?? val;
-      return `<div class="stat-row"><span>${label}</span><strong>${count}</strong></div>`;
-    })
-    .join("");
+  const statusLines = STATUS_ORDER.map((val) => {
+    const count = byStatus[val] ?? 0;
+    const label = STATUS_LABELS[val] ?? val;
+    return `<div class="stat-row"><span>${label}</span><strong>${count}</strong></div>`;
+  }).join("");
 
   const unknownMsg = msgSentCount - videoCount - textCount;
 

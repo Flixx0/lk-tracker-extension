@@ -1,13 +1,22 @@
 "use client";
 
-import { STATUS_LABELS, PROSPECT_STATUSES, type FirstMessageType, type ProspectStatus } from "@/lib/types";
+import {
+  STATUS_LABELS,
+  STATUS_ORDER,
+  type FirstMessageType,
+  type ProspectStatus,
+} from "@/lib/types";
 import { useState } from "react";
 
 const STYLES: Record<ProspectStatus, string> = {
   invitation_envoyee: "bg-amber-100 text-amber-900 border-amber-200",
   connecte: "bg-sky-100 text-sky-900 border-sky-200",
   message_envoye: "bg-teal-100 text-teal-900 border-teal-200",
+  // Legacy + 1ère relance
   relance_a_faire: "bg-rose-100 text-rose-900 border-rose-200",
+  "1ere_relance": "bg-rose-100 text-rose-900 border-rose-200",
+  // 2ème relance (un peu plus foncée)
+  "2eme_relance": "bg-fuchsia-100 text-fuchsia-900 border-fuchsia-200",
   pas_interesse: "bg-stone-100 text-stone-900 border-stone-200",
 };
 
@@ -29,6 +38,9 @@ export function StatusSelect({
   onChange: (next: ProspectStatus) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const options: ProspectStatus[] = STATUS_ORDER.includes(status)
+    ? STATUS_ORDER
+    : [...STATUS_ORDER, status];
 
   return (
     <select
@@ -46,7 +58,7 @@ export function StatusSelect({
       }}
       className={`cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide whitespace-nowrap outline-none transition disabled:opacity-60 disabled:cursor-wait ${STYLES[status] ?? "bg-stone-100 text-stone-700 border-stone-200"}`}
     >
-      {Object.values(PROSPECT_STATUSES).map((s) => (
+      {options.map((s) => (
         <option key={s} value={s}>
           {STATUS_LABELS[s]}
         </option>
