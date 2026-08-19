@@ -8,6 +8,7 @@ const STYLES: Record<ProspectStatus, string> = {
   connecte: "bg-sky-100 text-sky-900 border-sky-200",
   message_envoye: "bg-teal-100 text-teal-900 border-teal-200",
   relance_a_faire: "bg-rose-100 text-rose-900 border-rose-200",
+  pas_interesse: "bg-stone-100 text-stone-900 border-stone-200",
 };
 
 export function StatusBadge({ status }: { status: ProspectStatus }) {

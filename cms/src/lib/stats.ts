@@ -29,6 +29,7 @@ export function computeStats(prospects: Prospect[]) {
     connecte: 0,
     message_envoye: 0,
     relance_a_faire: 0,
+    pas_interesse: 0,
   };
 
   let createdToday = 0;

@@ -3,6 +3,7 @@ export const PROSPECT_STATUSES = {
   CONNECTED: "connecte",
   MESSAGE_SENT: "message_envoye",
   FOLLOW_UP_PENDING: "relance_a_faire",
+  NOT_INTERESTED: "pas_interesse",
 } as const;
 
 export type ProspectStatus = (typeof PROSPECT_STATUSES)[keyof typeof PROSPECT_STATUSES];
@@ -12,6 +13,7 @@ export const STATUS_LABELS: Record<ProspectStatus, string> = {
   connecte: "Connecté",
   message_envoye: "Message envoyé",
   relance_a_faire: "Relance à faire",
+  pas_interesse: "Pas intéressé",
 };
 
 export const STATUS_ORDER: ProspectStatus[] = [
@@ -19,6 +21,7 @@ export const STATUS_ORDER: ProspectStatus[] = [
   "connecte",
   "message_envoye",
   "relance_a_faire",
+  "pas_interesse",
 ];
 
 export type FirstMessageType = "video" | "text";

@@ -28,6 +28,7 @@ const STATUS_RANK: Record<ProspectStatus, number> = {
   connecte: 2,
   message_envoye: 3,
   relance_a_faire: 3,
+  pas_interesse: 0,
 };
 
 function parseStatus(value: string | undefined): ProspectStatus {
