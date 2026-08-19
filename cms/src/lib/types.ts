@@ -83,7 +83,8 @@ export type PipelineTab =
   | "to_contact"
   | "first_message"
   | "follow_up"
-  | "followed_up";
+  | "followed_up"
+  | "not_interested";
 
 export type SortKey =
   | "name"

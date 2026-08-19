@@ -22,6 +22,7 @@ export function matchesMessageType(p: Prospect, scope: MessageTypeScope): boolea
 }
 
 export function isFollowUpDue(p: Prospect, now = new Date()): boolean {
+  if (p.status === PROSPECT_STATUSES.NOT_INTERESTED) return false;
   if (
     p.status === PROSPECT_STATUSES.FOLLOW_UP_PENDING ||
     p.status === PROSPECT_STATUSES.FIRST_FOLLOW_UP ||
@@ -79,6 +80,8 @@ export function matchesTab(
       return isFollowUpDue(p, now);
     case "followed_up":
       return isFollowedUp(p, now);
+    case "not_interested":
+      return p.status === PROSPECT_STATUSES.NOT_INTERESTED;
   }
 }
 
@@ -91,6 +94,7 @@ export function tabCounts(prospects: Prospect[], now = new Date()) {
     first_message: 0,
     follow_up: 0,
     followed_up: 0,
+    not_interested: 0,
     todayCreated: 0,
     todayInvited: 0,
     todayConnected: 0,
@@ -103,6 +107,7 @@ export function tabCounts(prospects: Prospect[], now = new Date()) {
   };
 
   for (const p of prospects) {
+    if (p.status === PROSPECT_STATUSES.NOT_INTERESTED) counts.not_interested += 1;
     if (matchesToday(p, "created", now)) {
       counts.today += 1;
       counts.todayCreated += 1;

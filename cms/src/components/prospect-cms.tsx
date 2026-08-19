@@ -26,6 +26,7 @@ const TABS: { id: PipelineTab; label: string }[] = [
   { id: "first_message", label: "1er message" },
   { id: "follow_up", label: "À relancer" },
   { id: "followed_up", label: "Relancés" },
+  { id: "not_interested", label: "Pas intéressé" },
 ];
 
 const TODAY_SCOPES: { id: TodayScope; label: string; countKey: keyof ReturnType<typeof tabCounts> }[] = [
@@ -328,6 +329,9 @@ export function ProspectCms() {
                   <p className="text-sm text-muted">
                     Relances dont la date est arrivée (1ère/2ème relance). Les lignes en rose sont dues.
                   </p>
+                ) : null}
+                {tab === "not_interested" ? (
+                  <p className="text-sm text-muted">Prospects marqués “pas intéressé”.</p>
                 ) : null}
                 {tab === "to_contact" ? (
                   <p className="text-sm text-muted">Connectés qui n’ont pas encore reçu le premier message.</p>

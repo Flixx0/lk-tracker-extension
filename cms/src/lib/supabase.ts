@@ -139,7 +139,9 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
   const send = (body: Record<string, unknown>) =>
     request<DbRow[]>("prospects", {
       method: "PATCH",
-      params: { id: `eq.${id}` },
+      // PostgREST a parfois besoin d’une valeur “string” correctement quotée
+      // quand l’ID contient des caractères Unicode (emoji, ellipsis, etc.).
+      params: { id: `eq.${JSON.stringify(id)}` },
       body: JSON.stringify(body),
     });
 
@@ -168,6 +170,6 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
 export async function deleteProspect(id: string): Promise<void> {
   await request("prospects", {
     method: "DELETE",
-    params: { id: `eq.${id}` },
+    params: { id: `eq.${JSON.stringify(id)}` },
   });
 }
