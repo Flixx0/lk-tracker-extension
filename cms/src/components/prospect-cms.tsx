@@ -108,10 +108,10 @@ export function ProspectCms() {
   async function save(id: string, patch: ProspectPatch) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/prospects/${encodeURIComponent(id)}`, {
-        method: "PATCH",
+      const res = await fetch("/api/prospects/update", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({ id, action: "patch", patch }),
       });
       const data = (await res.json()) as { prospect?: Prospect; error?: string };
       if (!res.ok || !data.prospect) throw new Error(data.error ?? "Mise à jour impossible");
@@ -131,8 +131,12 @@ export function ProspectCms() {
   async function remove(id: string) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/prospects/${encodeURIComponent(id)}`, { method: "DELETE" });
-      const data = (await res.json()) as { error?: string };
+      const res = await fetch("/api/prospects/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "delete" }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Suppression impossible");
       setProspects((list) => list.filter((p) => p.id !== id));
       setSelectedId(undefined);

@@ -11,7 +11,7 @@ const SUPABASE_ANON_KEY =
 function requireConfig() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new Error(
-      "Supabase n’est pas configuré. Ajoute SUPABASE_URL et SUPABASE_ANON_KEY dans .env.local (ou les variables Vercel)."
+      "Supabase n'est pas configuré. Ajoute SUPABASE_URL et SUPABASE_ANON_KEY dans .env.local (ou les variables Vercel)."
     );
   }
   return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY };
@@ -136,12 +136,12 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
   if (patch.followUpSentAt !== undefined) dbPatch.follow_up_sent_at = patch.followUpSentAt;
   if (patch.notes !== undefined) dbPatch.notes = patch.notes;
 
+  // L'id est passé directement — il vient du body JSON, pas de l'URL,
+  // donc pas de risque de double-encodage avec les caractères Unicode.
   const send = (body: Record<string, unknown>) =>
     request<DbRow[]>("prospects", {
       method: "PATCH",
-      // PostgREST a parfois besoin d’une valeur “string” correctement quotée
-      // quand l’ID contient des caractères Unicode (emoji, ellipsis, etc.).
-      params: { id: `eq.${JSON.stringify(id)}` },
+      params: { id: `eq.${id}` },
       body: JSON.stringify(body),
     });
 
@@ -170,6 +170,6 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
 export async function deleteProspect(id: string): Promise<void> {
   await request("prospects", {
     method: "DELETE",
-    params: { id: `eq.${JSON.stringify(id)}` },
+    params: { id: `eq.${id}` },
   });
 }
