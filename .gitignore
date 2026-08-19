@@ -3,3 +3,4 @@ node_modules/
 cms/.next/
 cms/.env.local
 cms/.env*.local
+.vercel

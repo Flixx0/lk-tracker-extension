@@ -58,14 +58,14 @@ export function StatsPanel({ stats }: { stats: ProspectStats }) {
               <p className="text-xs font-medium tracking-wide text-violet-800 uppercase">Vidéos</p>
               <p className="mt-0.5 text-2xl font-semibold text-violet-950">{stats.videoCount}</p>
               <p className="mt-1 text-xs text-violet-800/80">
-                {pct(stats.videoShare)} · {stats.videoToday} aujourd’hui · {stats.videoThisWeek} cette semaine
+                {pct(stats.videoShare)} · {pct(stats.videoResponseRate)} réponse · {stats.videoToday} aujourd’hui · {stats.videoThisWeek} cette semaine
               </p>
             </div>
             <div className="rounded-xl bg-sky-50 px-3 py-3">
               <p className="text-xs font-medium tracking-wide text-sky-800 uppercase">Textes</p>
               <p className="mt-0.5 text-2xl font-semibold text-sky-950">{stats.textCount}</p>
               <p className="mt-1 text-xs text-sky-800/80">
-                {pct(stats.textShare)} · {stats.textToday} aujourd’hui · {stats.textThisWeek} cette semaine
+                {pct(stats.textShare)} · {pct(stats.textResponseRate)} réponse · {stats.textToday} aujourd’hui · {stats.textThisWeek} cette semaine
               </p>
             </div>
           </div>

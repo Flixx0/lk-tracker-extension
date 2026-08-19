@@ -168,9 +168,30 @@ export function computeStats(prospects: Prospect[]) {
   const followUpDue = prospects.filter((p) => isFollowUpDue(p, now)).length;
   const followedUp = prospects.filter((p) => isFollowedUp(p, now)).length;
 
+  // "Taux de réponse" approximatif : parmi ceux à qui tu as envoyé le 1er message
+  // (vidéo ou texte), quelle proportion est passée en "connecté" (ou équivalents de statut).
+  const isConnectedLike = (p: Prospect) =>
+    Boolean(p.connectionAcceptedAt) ||
+    p.status === "connecte" ||
+    p.status === "message_envoye" ||
+    p.status === "relance_a_faire" ||
+    p.status === "1ere_relance" ||
+    p.status === "2eme_relance";
+
+  const videoConnectedCount = prospects.filter(
+    (p) => p.firstMessageType === "video" && isConnectedLike(p)
+  ).length;
+  const textConnectedCount = prospects.filter(
+    (p) => p.firstMessageType === "text" && isConnectedLike(p)
+  ).length;
+
   const typedMessages = videoCount + textCount;
   const videoShare = typedMessages > 0 ? videoCount / typedMessages : null;
   const textShare = typedMessages > 0 ? textCount / typedMessages : null;
+
+  const videoResponseRate = videoCount > 0 ? videoConnectedCount / videoCount : null;
+  const textResponseRate = textCount > 0 ? textConnectedCount / textCount : null;
+
   const acceptRate = invited > 0 ? connected / invited : null;
   const messageRate = connected > 0 ? messaged / connected : null;
   const contactRate = toContact + messaged > 0 ? messaged / (toContact + messaged) : null;
@@ -198,6 +219,8 @@ export function computeStats(prospects: Prospect[]) {
     messaged,
     followUpDue,
     followedUp,
+    videoResponseRate,
+    textResponseRate,
     createdToday,
     invitedToday,
     connectedToday,

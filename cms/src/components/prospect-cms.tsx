@@ -107,7 +107,7 @@ export function ProspectCms() {
   async function save(id: string, patch: ProspectPatch) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/prospects/${id}`, {
+      const res = await fetch(`/api/prospects/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -130,7 +130,7 @@ export function ProspectCms() {
   async function remove(id: string) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/prospects/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/prospects/${encodeURIComponent(id)}`, { method: "DELETE" });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Suppression impossible");
       setProspects((list) => list.filter((p) => p.id !== id));
