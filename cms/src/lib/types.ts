@@ -21,6 +21,13 @@ export const STATUS_ORDER: ProspectStatus[] = [
   "relance_a_faire",
 ];
 
+export type FirstMessageType = "video" | "text";
+
+export const MESSAGE_TYPE_LABELS: Record<FirstMessageType, string> = {
+  video: "Vidéo",
+  text: "Texte",
+};
+
 export interface Prospect {
   id: string;
   name: string;
@@ -29,6 +36,7 @@ export interface Prospect {
   jobTitle?: string;
   jobTitleCandidates?: string[];
   status: ProspectStatus;
+  firstMessageType?: FirstMessageType;
   invitationSentAt?: string;
   connectionAcceptedAt?: string;
   messageSentAt?: string;
@@ -46,6 +54,7 @@ export interface DbRow {
   job_title: string | null;
   job_title_candidates: string[] | null;
   status: string;
+  first_message_type?: string | null;
   invitation_sent_at: string | null;
   connection_accepted_at: string | null;
   message_sent_at: string | null;
@@ -70,6 +79,7 @@ export type SortKey =
   | "status"
   | "invitationSentAt"
   | "connectionAcceptedAt"
+  | "firstMessageType"
   | "messageSentAt"
   | "followUpDate"
   | "createdAt"
@@ -77,10 +87,13 @@ export type SortKey =
 
 export type TodayScope = "created" | "invited" | "connected" | "messaged" | "updated";
 
+export type MessageTypeScope = "all" | "video" | "text" | "unknown";
+
 export interface ProspectPatch {
   name?: string;
   jobTitle?: string | null;
   status?: ProspectStatus;
+  firstMessageType?: FirstMessageType | null;
   invitationSentAt?: string | null;
   connectionAcceptedAt?: string | null;
   messageSentAt?: string | null;

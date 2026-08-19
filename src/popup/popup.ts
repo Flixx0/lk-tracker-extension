@@ -1,4 +1,4 @@
-import type { AppSettings, DetectedProfile, ExtensionMessage, Prospect } from "../shared/types";
+import type { AppSettings, DetectedProfile, ExtensionMessage, FirstMessageType, Prospect, ProspectStatus } from "../shared/types";
 import { PROSPECT_STATUSES, STATUS_LABELS } from "../shared/types";
 import { formatProfileForAi } from "../shared/profile-ai-export";
 
@@ -19,7 +19,8 @@ function sendMessage<T>(message: ExtensionMessage): Promise<T> {
 const toggle = document.getElementById("tracking-toggle") as HTMLInputElement;
 const toggleLabel = document.getElementById("toggle-label")!;
 const syncBtn = document.getElementById("sync-connections")!;
-const syncMessagesBtn = document.getElementById("sync-messages")!;
+const syncMessagesWeekBtn = document.getElementById("sync-messages-week")!;
+const syncMessagesAllBtn = document.getElementById("sync-messages-all")!;
 const exportBtn = document.getElementById("export-excel")!;
 const followUpInput = document.getElementById("follow-up-days") as HTMLInputElement;
 const prospectList = document.getElementById("prospect-list")!;
@@ -46,6 +47,7 @@ const openPanelWindowBtn = document.getElementById("open-panel-window") as HTMLB
 const openSidePanelBtn = document.getElementById("open-side-panel") as HTMLButtonElement;
 
 const isWindowMode = new URLSearchParams(location.search).get("mode") === "window";
+
 if (isWindowMode) {
   document.body.classList.add("window-mode");
   openPanelWindowBtn.hidden = true;
@@ -422,10 +424,46 @@ function createProspectListItem(
   }
   body.appendChild(metaEl);
 
-  const statusEl = document.createElement("span");
-  statusEl.className = "prospect-status";
-  statusEl.textContent = STATUS_LABELS[prospect.status] ?? prospect.status;
-  body.appendChild(statusEl);
+  const statusRow = document.createElement("div");
+  statusRow.className = "prospect-status-row";
+
+  const statusSelect = document.createElement("select");
+  statusSelect.className = "prospect-status-select";
+  statusSelect.title = "Changer le statut";
+  for (const [, value] of Object.entries(PROSPECT_STATUSES)) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = STATUS_LABELS[value] ?? value;
+    if (value === prospect.status) opt.selected = true;
+    statusSelect.appendChild(opt);
+  }
+  statusSelect.addEventListener("change", async () => {
+    const newStatus = statusSelect.value as ProspectStatus;
+    statusSelect.disabled = true;
+    try {
+      await sendMessage({
+        type: "UPDATE_PROSPECT",
+        payload: { id: prospect.id, patch: { status: newStatus } },
+      });
+      await loadProspects();
+    } catch (err) {
+      showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
+      statusSelect.value = prospect.status;
+    } finally {
+      statusSelect.disabled = false;
+    }
+  });
+  statusRow.appendChild(statusSelect);
+
+  if (prospect.firstMessageType) {
+    const badge = document.createElement("span");
+    badge.className = `msg-type-badge msg-type-${prospect.firstMessageType}`;
+    badge.textContent = prospect.firstMessageType === "video" ? "🎥" : "💬";
+    badge.title = prospect.firstMessageType === "video" ? "Premier message : vidéo" : "Premier message : texte";
+    statusRow.appendChild(badge);
+  }
+
+  body.appendChild(statusRow);
 
   appendTitleChoices(body, prospect);
 
@@ -448,6 +486,59 @@ function renderProspectList(
   }
 }
 
+function renderStats(prospects: Prospect[]): void {
+  const statsContent = document.getElementById("stats-content");
+  if (!statsContent) return;
+
+  const total = prospects.length;
+  const byStatus: Record<string, number> = {};
+  let videoCount = 0;
+  let textCount = 0;
+  let msgSentCount = 0;
+
+  for (const p of prospects) {
+    byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
+    if (p.messageSentAt) {
+      msgSentCount++;
+      if (p.firstMessageType === "video") videoCount++;
+      else if (p.firstMessageType === "text") textCount++;
+    }
+  }
+
+  const statusLines = Object.entries(PROSPECT_STATUSES)
+    .map(([, val]) => {
+      const count = byStatus[val] ?? 0;
+      const label = STATUS_LABELS[val] ?? val;
+      return `<div class="stat-row"><span>${label}</span><strong>${count}</strong></div>`;
+    })
+    .join("");
+
+  const unknownMsg = msgSentCount - videoCount - textCount;
+
+  statsContent.innerHTML = `
+    <div class="stat-section">
+      <div class="stat-title">Par statut</div>
+      ${statusLines}
+      <div class="stat-row stat-total"><span>Total</span><strong>${total}</strong></div>
+    </div>
+    <div class="stat-section">
+      <div class="stat-title">1er message envoyé</div>
+      <div class="stat-row"><span>🎥 Vidéo</span><strong>${videoCount}</strong></div>
+      <div class="stat-row"><span>💬 Texte</span><strong>${textCount}</strong></div>
+      ${unknownMsg > 0 ? `<div class="stat-row"><span>❓ Non détecté</span><strong>${unknownMsg}</strong></div>` : ""}
+      <div class="stat-row stat-total"><span>Total messages envoyés</span><strong>${msgSentCount}</strong></div>
+      ${msgSentCount > 0 && (videoCount + textCount) > 0 ? `
+        <div class="stat-bar">
+          <div class="stat-bar-video" style="width: ${(videoCount / (videoCount + textCount) * 100).toFixed(0)}%"
+            title="${videoCount} vidéo${videoCount > 1 ? "s" : ""}"></div>
+          <div class="stat-bar-text" style="width: ${(textCount / (videoCount + textCount) * 100).toFixed(0)}%"
+            title="${textCount} texte${textCount > 1 ? "s" : ""}"></div>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
 function renderProspects(prospects: Prospect[]): void {
   cachedProspects = prospects;
   prospectCount.textContent = String(prospects.length);
@@ -459,6 +550,8 @@ function renderProspects(prospects: Prospect[]): void {
   toContactEmpty.hidden = toContact.length > 0;
   renderProspectList(toContactList, toContact, { showCopyLink: true, showMarkMessage: true });
   renderProspectList(prospectList, sorted, { limit: 50 });
+
+  renderStats(prospects);
 
   if (currentDetectedProfile) {
     renderDetectedProfile(currentDetectedProfile);
@@ -654,12 +747,16 @@ async function openOrReuseLinkedInTab(url: string): Promise<chrome.tabs.Tab | nu
 
 async function openLinkedInSync(options: {
   pendingKey: string;
+  pendingPayload?: Record<string, unknown>;
   url: string;
   triggerType: ExtensionMessage["type"];
+  triggerPayload?: Record<string, unknown>;
   statusText: string;
   fallbackText: string;
 }): Promise<void> {
-  await chrome.storage.local.set({ [options.pendingKey]: true });
+  await chrome.storage.local.set({
+    [options.pendingKey]: options.pendingPayload ?? true,
+  });
 
   const tab = await openOrReuseLinkedInTab(options.url);
   if (!tab?.id) {
@@ -672,7 +769,10 @@ async function openLinkedInSync(options: {
   const tabId = tab.id;
   const triggerSync = async (): Promise<boolean> => {
     try {
-      await chrome.tabs.sendMessage(tabId, { type: options.triggerType });
+      await chrome.tabs.sendMessage(tabId, {
+        type: options.triggerType,
+        payload: options.triggerPayload,
+      });
       return true;
     } catch {
       return false;
@@ -717,12 +817,26 @@ syncBtn.addEventListener("click", async () => {
   });
 });
 
-syncMessagesBtn.addEventListener("click", async () => {
+syncMessagesWeekBtn.addEventListener("click", async () => {
   await openLinkedInSync({
     pendingKey: "lkPendingMessagesSync",
+    pendingPayload: { mode: "week" },
     url: "https://www.linkedin.com/messaging/",
     triggerType: "TRIGGER_MESSAGES_SYNC",
-    statusText: "Sync messages en cours…",
+    triggerPayload: { mode: "week" },
+    statusText: "Sync messages (7 jours) en cours…",
+    fallbackText: "Page ouverte — sync messages auto dans quelques secondes",
+  });
+});
+
+syncMessagesAllBtn.addEventListener("click", async () => {
+  await openLinkedInSync({
+    pendingKey: "lkPendingMessagesSync",
+    pendingPayload: { mode: "all" },
+    url: "https://www.linkedin.com/messaging/",
+    triggerType: "TRIGGER_MESSAGES_SYNC",
+    triggerPayload: { mode: "all" },
+    statusText: "Sync messages (tous) en cours…",
     fallbackText: "Page ouverte — sync messages auto dans quelques secondes",
   });
 });
@@ -765,37 +879,7 @@ refreshDetectedProfile();
 openPanelWindowBtn.addEventListener("click", async () => {
   openPanelWindowBtn.disabled = true;
   try {
-    // Ouvre la fenêtre depuis le popup (plus fiable qu'via le SW, surtout sur Arc)
-    const stored = await chrome.storage.local.get(PANEL_WINDOW_ID_KEY);
-    const existingId = stored[PANEL_WINDOW_ID_KEY] as number | undefined;
-
-    if (existingId) {
-      try {
-        await chrome.windows.update(existingId, {
-          focused: true,
-          width: 420,
-          height: 720,
-          state: "normal",
-        });
-        window.close();
-        return;
-      } catch {
-        await chrome.storage.local.remove(PANEL_WINDOW_ID_KEY);
-      }
-    }
-
-    const win = await chrome.windows.create({
-      url: chrome.runtime.getURL("popup.html?mode=window"),
-      type: "normal",
-      width: 420,
-      height: 720,
-      focused: true,
-    });
-
-    if (win.id) {
-      await chrome.storage.local.set({ [PANEL_WINDOW_ID_KEY]: win.id });
-      await chrome.windows.update(win.id, { width: 420, height: 720, state: "normal" });
-    }
+    await sendMessage({ type: "OPEN_PANEL_WINDOW" });
     window.close();
   } catch (err) {
     showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);

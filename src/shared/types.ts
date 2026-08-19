@@ -14,6 +14,8 @@ export const STATUS_LABELS: Record<ProspectStatus, string> = {
   relance_a_faire: "Relance à faire",
 };
 
+export type FirstMessageType = "video" | "text";
+
 export interface Prospect {
   id: string;
   name: string;
@@ -23,6 +25,8 @@ export interface Prospect {
   /** Titres ambigus détectés à la sync — choix manuel dans le popup. */
   jobTitleCandidates?: string[];
   status: ProspectStatus;
+  /** Type du premier message envoyé (vidéo ou texte). */
+  firstMessageType?: FirstMessageType;
   invitationSentAt?: string;
   connectionAcceptedAt?: string;
   messageSentAt?: string;
@@ -34,18 +38,11 @@ export interface Prospect {
 export interface AppSettings {
   trackingEnabled: boolean;
   followUpDays: number;
-  spreadsheetId?: string;
-  sheetTabName: string;
-  sheetsSyncEnabled: boolean;
-  googleConnected: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   trackingEnabled: false,
   followUpDays: 3,
-  sheetTabName: "Feuille 1",
-  sheetsSyncEnabled: false,
-  googleConnected: false,
 };
 
 export type MessageType =

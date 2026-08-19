@@ -4,6 +4,7 @@ import {
 import { isExtensionContextValid } from "../shared/extension-context";
 import { logActivity } from "../shared/log-activity";
 import { sendToBackground } from "../shared/messaging";
+import { showSyncBanner, hideSyncBanner } from "../shared/sync-banner";
 import type { ExtensionMessage } from "../shared/types";
 
 const PENDING_SYNC_KEY = "lkPendingConnectionsSync";
@@ -26,6 +27,7 @@ async function syncConnections(): Promise<void> {
       return;
     }
 
+    showSyncBanner("LK Tracker — Sync connexions en cours…");
     await logActivity("Sync connexions en cours…", "LK Tracker", false, true);
     console.log("[LK Tracker] Début sync connexions…", location.pathname);
 
@@ -49,6 +51,7 @@ async function syncConnections(): Promise<void> {
     );
 
     if (connections.length === 0) {
+      hideSyncBanner("Aucune connexion trouvée", true);
       await logActivity("Aucune connexion trouvée sur la page", "LK Tracker — sync", true);
       return;
     }
@@ -64,6 +67,7 @@ async function syncConnections(): Promise<void> {
     });
 
     if (!result) {
+      hideSyncBanner("Sync échouée — rafraîchis la page", true);
       await logActivity("Sync échouée — rafraîchis la page (F5)", "LK Tracker — erreur", true);
       return;
     }
@@ -79,15 +83,17 @@ async function syncConnections(): Promise<void> {
     const metaPart = meta > 0 ? `${meta} photo/titre mis à jour` : null;
     const pendingPart = pending > 0 ? `${pending} titre(s) à choisir dans le popup` : null;
 
-    await logActivity(
-      `Sync terminée : ${[statusPart, metaPart, pendingPart].filter(Boolean).join(" · ")}`,
-      "LK Tracker — sync"
-    );
+    const summary = [statusPart, metaPart, pendingPart].filter(Boolean).join(" · ");
+    hideSyncBanner(`✓ ${summary}`);
+    await logActivity(`Sync terminée : ${summary}`, "LK Tracker — sync");
 
     void sendToBackground({
       type: "CONNECTIONS_SYNC_DONE",
       payload: result,
     });
+  } catch (err) {
+    hideSyncBanner("Sync connexions échouée", true);
+    throw err;
   } finally {
     syncRunning = false;
   }

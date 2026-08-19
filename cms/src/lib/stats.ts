@@ -43,6 +43,8 @@ export function computeStats(prospects: Prospect[]) {
 
   const acceptDelays: number[] = [];
   const messageDelays: number[] = [];
+  const videoDelays: number[] = [];
+  const textDelays: number[] = [];
   const pendingInviteAges: number[] = [];
   const overdueFollowUpAges: number[] = [];
   const jobCounts = new Map<string, number>();
@@ -52,11 +54,20 @@ export function computeStats(prospects: Prospect[]) {
   const invitedByDay: Record<string, number> = { ...createdByDay };
   const connectedByDay: Record<string, number> = { ...createdByDay };
   const messagedByDay: Record<string, number> = { ...createdByDay };
+  const videoByDay: Record<string, number> = { ...createdByDay };
+  const textByDay: Record<string, number> = { ...createdByDay };
 
   let withPhoto = 0;
   let withJob = 0;
   let staleInvites7 = 0;
   let staleInvites14 = 0;
+  let videoCount = 0;
+  let textCount = 0;
+  let unknownMsgCount = 0;
+  let videoToday = 0;
+  let textToday = 0;
+  let videoThisWeek = 0;
+  let textThisWeek = 0;
 
   for (const p of prospects) {
     if (p.status in byStatus) byStatus[p.status as ProspectStatus] += 1;
@@ -88,6 +99,20 @@ export function computeStats(prospects: Prospect[]) {
       if (d === today) messagedToday += 1;
       if (d >= weekStart) messagedThisWeek += 1;
       if (d in messagedByDay) messagedByDay[d] += 1;
+
+      if (p.firstMessageType === "video") {
+        videoCount += 1;
+        if (d === today) videoToday += 1;
+        if (d >= weekStart) videoThisWeek += 1;
+        if (d in videoByDay) videoByDay[d] += 1;
+      } else if (p.firstMessageType === "text") {
+        textCount += 1;
+        if (d === today) textToday += 1;
+        if (d >= weekStart) textThisWeek += 1;
+        if (d in textByDay) textByDay[d] += 1;
+      } else {
+        unknownMsgCount += 1;
+      }
     }
 
     if (p.invitationSentAt && p.connectionAcceptedAt) {
@@ -97,7 +122,11 @@ export function computeStats(prospects: Prospect[]) {
 
     if (p.connectionAcceptedAt && p.messageSentAt) {
       const n = daysBetween(p.connectionAcceptedAt, p.messageSentAt);
-      if (n !== null && n >= 0) messageDelays.push(n);
+      if (n !== null && n >= 0) {
+        messageDelays.push(n);
+        if (p.firstMessageType === "video") videoDelays.push(n);
+        if (p.firstMessageType === "text") textDelays.push(n);
+      }
     }
 
     if (isInvitationPending(p) && p.invitationSentAt) {
@@ -134,6 +163,9 @@ export function computeStats(prospects: Prospect[]) {
   const followUpDue = prospects.filter((p) => isFollowUpDue(p, now)).length;
   const followedUp = prospects.filter((p) => isFollowedUp(p, now)).length;
 
+  const typedMessages = videoCount + textCount;
+  const videoShare = typedMessages > 0 ? videoCount / typedMessages : null;
+  const textShare = typedMessages > 0 ? textCount / typedMessages : null;
   const acceptRate = invited > 0 ? connected / invited : null;
   const messageRate = connected > 0 ? messaged / connected : null;
   const contactRate = toContact + messaged > 0 ? messaged / (toContact + messaged) : null;
@@ -178,6 +210,17 @@ export function computeStats(prospects: Prospect[]) {
     medianAcceptDays: median(acceptDelays),
     avgMessageDays: avg(messageDelays),
     medianMessageDays: median(messageDelays),
+    avgVideoMessageDays: avg(videoDelays),
+    avgTextMessageDays: avg(textDelays),
+    videoCount,
+    textCount,
+    unknownMsgCount,
+    videoToday,
+    textToday,
+    videoThisWeek,
+    textThisWeek,
+    videoShare,
+    textShare,
     staleInvites7,
     staleInvites14,
     withPhoto,
@@ -192,6 +235,8 @@ export function computeStats(prospects: Prospect[]) {
       invited: invitedByDay[day] ?? 0,
       connected: connectedByDay[day] ?? 0,
       messaged: messagedByDay[day] ?? 0,
+      video: videoByDay[day] ?? 0,
+      text: textByDay[day] ?? 0,
     })),
     funnel: [
       { label: "Prospects", value: prospects.length },

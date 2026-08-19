@@ -3,9 +3,9 @@
 import { ArrowDown, ArrowUp, Copy, ExternalLink, Mail, RotateCw } from "lucide-react";
 import { formatDate, relativeLabel } from "@/lib/dates";
 import { isFollowUpDue } from "@/lib/pipeline";
-import type { Prospect, SortKey } from "@/lib/types";
+import type { Prospect, ProspectStatus, SortKey } from "@/lib/types";
 import { Avatar } from "./avatar";
-import { StatusBadge } from "./status-badge";
+import { MessageTypeBadge, StatusSelect } from "./status-badge";
 
 const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "name", label: "Prospect" },
@@ -13,6 +13,7 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "invitationSentAt", label: "Invitation" },
   { key: "connectionAcceptedAt", label: "Connecté" },
   { key: "messageSentAt", label: "1er message" },
+  { key: "firstMessageType", label: "Type" },
   { key: "followUpDate", label: "Relance" },
   { key: "createdAt", label: "Créé" },
 ];
@@ -27,6 +28,7 @@ export function ProspectTable({
   onCopy,
   onMarkMessage,
   onMarkFollowUp,
+  onStatusChange,
 }: {
   prospects: Prospect[];
   sortKey: SortKey;
@@ -37,6 +39,7 @@ export function ProspectTable({
   onCopy: (url: string) => void;
   onMarkMessage: (prospect: Prospect) => void;
   onMarkFollowUp: (prospect: Prospect) => void;
+  onStatusChange: (prospect: Prospect, status: ProspectStatus) => void;
 }) {
   return (
     <div className="overflow-auto rounded-2xl border border-line bg-panel">
@@ -82,8 +85,11 @@ export function ProspectTable({
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-2.5">
-                  <StatusBadge status={p.status} />
+                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                  <StatusSelect
+                    status={p.status}
+                    onChange={(next) => onStatusChange(p, next)}
+                  />
                 </td>
                 <td className="px-3 py-2.5 text-muted">
                   <DateCell iso={p.invitationSentAt} />
@@ -93,6 +99,17 @@ export function ProspectTable({
                 </td>
                 <td className="px-3 py-2.5 text-muted">
                   <DateCell iso={p.messageSentAt} />
+                </td>
+                <td className="px-3 py-2.5">
+                  {p.messageSentAt ? (
+                    p.firstMessageType ? (
+                      <MessageTypeBadge type={p.firstMessageType} />
+                    ) : (
+                      <span className="text-xs text-muted">Non détecté</span>
+                    )
+                  ) : (
+                    <span className="text-muted">—</span>
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   <DateCell iso={p.followUpDate} warn={due} />

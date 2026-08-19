@@ -28,6 +28,7 @@ interface DbRow {
   job_title: string | null;
   job_title_candidates: string[] | null;
   status: string;
+  first_message_type: string | null;
   invitation_sent_at: string | null;
   connection_accepted_at: string | null;
   message_sent_at: string | null;
@@ -45,6 +46,7 @@ function rowToProspect(row: DbRow): Prospect {
     jobTitle: row.job_title ?? undefined,
     jobTitleCandidates: row.job_title_candidates ?? undefined,
     status: row.status as Prospect["status"],
+    firstMessageType: (row.first_message_type as Prospect["firstMessageType"]) ?? undefined,
     invitationSentAt: row.invitation_sent_at ?? undefined,
     connectionAcceptedAt: row.connection_accepted_at ?? undefined,
     messageSentAt: row.message_sent_at ?? undefined,
@@ -63,6 +65,7 @@ function prospectToRow(p: Prospect): DbRow {
     job_title: p.jobTitle ?? null,
     job_title_candidates: p.jobTitleCandidates?.length ? p.jobTitleCandidates : null,
     status: p.status,
+    first_message_type: p.firstMessageType ?? null,
     invitation_sent_at: p.invitationSentAt ?? null,
     connection_accepted_at: p.connectionAcceptedAt ?? null,
     message_sent_at: p.messageSentAt ?? null,
@@ -137,6 +140,8 @@ export async function updateProspect(
       ? patch.jobTitleCandidates
       : null;
   if (patch.status !== undefined) dbPatchData.status = patch.status;
+  if (patch.firstMessageType !== undefined)
+    dbPatchData.first_message_type = patch.firstMessageType ?? null;
   if (patch.invitationSentAt !== undefined)
     dbPatchData.invitation_sent_at = patch.invitationSentAt ?? null;
   if (patch.connectionAcceptedAt !== undefined)

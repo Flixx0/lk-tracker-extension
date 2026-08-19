@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { addDaysIso } from "@/lib/dates";
 import { matchesTab, searchProspects, tabCounts } from "@/lib/pipeline";
 import { computeStats } from "@/lib/stats";
-import type { PipelineTab, Prospect, ProspectPatch, SortKey, TodayScope } from "@/lib/types";
+import type { MessageTypeScope, PipelineTab, Prospect, ProspectPatch, SortKey, TodayScope } from "@/lib/types";
 import { PROSPECT_STATUSES } from "@/lib/types";
 import { ProspectDrawer } from "./prospect-drawer";
 import { ProspectTable } from "./prospect-table";
@@ -36,6 +36,13 @@ const TODAY_SCOPES: { id: TodayScope; label: string; countKey: keyof ReturnType<
   { id: "updated", label: "Mis à jour", countKey: "todayUpdated" },
 ];
 
+const MESSAGE_SCOPES: { id: MessageTypeScope; label: string; countKey: keyof ReturnType<typeof tabCounts> }[] = [
+  { id: "all", label: "Tous", countKey: "first_message" },
+  { id: "video", label: "Vidéo", countKey: "videoMessages" },
+  { id: "text", label: "Texte", countKey: "textMessages" },
+  { id: "unknown", label: "Non détecté", countKey: "unknownMessages" },
+];
+
 type View = "pipeline" | "stats";
 
 export function ProspectCms() {
@@ -45,6 +52,7 @@ export function ProspectCms() {
   const [view, setView] = useState<View>("pipeline");
   const [tab, setTab] = useState<PipelineTab>("all");
   const [todayScope, setTodayScope] = useState<TodayScope>("created");
+  const [messageTypeScope, setMessageTypeScope] = useState<MessageTypeScope>("all");
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -82,9 +90,9 @@ export function ProspectCms() {
 
   const filtered = useMemo(() => {
     const searched = searchProspects(prospects, query);
-    const inTab = searched.filter((p) => matchesTab(p, tab, todayScope));
+    const inTab = searched.filter((p) => matchesTab(p, tab, todayScope, messageTypeScope));
     return [...inTab].sort((a, b) => compareProspects(a, b, sortKey, sortDir));
-  }, [prospects, query, tab, todayScope, sortKey, sortDir]);
+  }, [prospects, query, tab, todayScope, messageTypeScope, sortKey, sortDir]);
 
   const selected = prospects.find((p) => p.id === selectedId);
 
@@ -146,6 +154,7 @@ export function ProspectCms() {
       "Poste",
       "Profil",
       "Statut",
+      "Type 1er message",
       "Invitation",
       "Connexion",
       "Message",
@@ -159,6 +168,7 @@ export function ProspectCms() {
         p.jobTitle ?? "",
         p.profileUrl,
         p.status,
+        p.firstMessageType === "video" ? "vidéo" : p.firstMessageType === "text" ? "texte" : "",
         p.invitationSentAt ?? "",
         p.connectionAcceptedAt ?? "",
         p.messageSentAt ?? "",
@@ -287,6 +297,27 @@ export function ProspectCms() {
                   </div>
                 ) : null}
 
+                {tab === "first_message" ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {MESSAGE_SCOPES.map((item) =>
+                      item.id === "unknown" && counts.unknownMessages === 0 ? null : (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setMessageTypeScope(item.id)}
+                          className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                            messageTypeScope === item.id
+                              ? "bg-teal-800 text-white"
+                              : "bg-white text-muted ring-1 ring-line"
+                          }`}
+                        >
+                          {item.label} {counts[item.countKey]}
+                        </button>
+                      )
+                    )}
+                  </div>
+                ) : null}
+
                 {tab === "follow_up" ? (
                   <p className="text-sm text-muted">
                     Relances dont la date est arrivée (ou statut « relance à faire »). Les lignes en rose sont dues.
@@ -297,6 +328,12 @@ export function ProspectCms() {
                 ) : null}
                 {tab === "invites" ? (
                   <p className="text-sm text-muted">Invitations encore en attente d’acceptation.</p>
+                ) : null}
+                {tab === "first_message" ? (
+                  <p className="text-sm text-muted">
+                    {counts.videoMessages} vidéo · {counts.textMessages} texte
+                    {counts.unknownMessages > 0 ? ` · ${counts.unknownMessages} non détecté` : ""}
+                  </p>
                 ) : null}
 
                 {loading && prospects.length === 0 ? (
@@ -324,6 +361,7 @@ export function ProspectCms() {
                         status: PROSPECT_STATUSES.MESSAGE_SENT,
                       })
                     }
+                    onStatusChange={(p, status) => void save(p.id, { status })}
                   />
                 )}
                 <p className="text-xs text-muted">{filtered.length} résultat{filtered.length === 1 ? "" : "s"}</p>

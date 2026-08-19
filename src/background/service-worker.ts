@@ -14,9 +14,18 @@ import {
 } from "../shared/storage";
 import { downloadExcel } from "../shared/export";
 import { isLikelyConnectionDateText } from "../shared/linkedin-dom";
+import { findProspectsInConversations, getLinkedInCsrfToken } from "../shared/linkedin-api";
 
 const PENDING_INVITE_KEY = "pendingInvite";
 const PANEL_WINDOW_ID_KEY = "lkPanelWindowId";
+
+// ─── Clic sur l'icône → ouvre directement la fenêtre détachée ────────────────
+
+chrome.action.onClicked.addListener(() => {
+  openPanelWindow().catch((err) =>
+    console.error("[LK Tracker] openPanelWindow:", err)
+  );
+});
 
 // ─── Migration au démarrage ───────────────────────────────────────────────────
 
@@ -33,12 +42,7 @@ async function openPanelWindow(): Promise<{ ok: true; windowId: number }> {
   if (existingId) {
     try {
       await chrome.windows.get(existingId);
-      await chrome.windows.update(existingId, {
-        focused: true,
-        width: 420,
-        height: 720,
-        state: "normal",
-      });
+      await chrome.windows.update(existingId, { focused: true, state: "normal" });
       return { ok: true, windowId: existingId };
     } catch {
       await chrome.storage.local.remove(PANEL_WINDOW_ID_KEY);
@@ -48,19 +52,14 @@ async function openPanelWindow(): Promise<{ ok: true; windowId: number }> {
   const win = await chrome.windows.create({
     url: chrome.runtime.getURL("popup.html?mode=window"),
     type: "normal",
-    width: 420,
-    height: 720,
+    width: 440,
+    height: 740,
     focused: true,
   });
 
   if (!win.id) throw new Error("Impossible de créer la fenêtre");
 
   await chrome.storage.local.set({ [PANEL_WINDOW_ID_KEY]: win.id });
-  await chrome.windows.update(win.id, {
-    width: 420,
-    height: 720,
-    state: "normal",
-  });
   return { ok: true, windowId: win.id };
 }
 
@@ -254,18 +253,30 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
     }
 
     case "RECORD_MESSAGE": {
-      const recordUrl = (message.payload as { profileUrl: string }).profileUrl;
-      return await recordMessage(recordUrl);
+      const recordPayload = message.payload as { profileUrl: string; firstMessageType?: "video" | "text" };
+      return await recordMessage(recordPayload.profileUrl, recordPayload.firstMessageType);
     }
 
     case "SYNC_MESSAGES": {
-      const messageThreads = message.payload as Array<{ name: string; profileUrl: string }>;
-      let messagesUpdated = 0;
-      for (const thread of messageThreads) {
-        const recordedMsg = await recordMessage(thread.profileUrl);
-        if (recordedMsg) messagesUpdated++;
+      // Payload peut être un tableau de threads (legacy) ou un objet mode
+      const payload = message.payload as
+        | Array<{ name: string; profileUrl: string; firstMessageType?: "video" | "text" }>
+        | { mode?: "week" | "all" }
+        | null;
+
+      // Legacy : le content script a déjà fait le travail et envoie les threads
+      if (Array.isArray(payload)) {
+        let messagesUpdated = 0;
+        for (const thread of payload) {
+          const recordedMsg = await recordMessage(thread.profileUrl, thread.firstMessageType);
+          if (recordedMsg) messagesUpdated++;
+        }
+        return { updated: messagesUpdated };
       }
-      return { updated: messagesUpdated };
+
+      // Nouveau : appel Voyager API depuis le service worker
+      const mode = (payload as { mode?: string } | null)?.mode ?? "all";
+      return await syncMessagesViaApi(mode as "week" | "all");
     }
 
     case "SYNC_CONNECTIONS": {
@@ -408,6 +419,66 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
 
 // ─── Fonctions exportées (utilisées par content scripts) ─────────────────────
 
+/**
+ * Sync messages via l'API Voyager LinkedIn (côté service worker).
+ * Plus fiable que le DOM scraping — LinkedIn utilise cette API en interne.
+ *
+ * Le rate-limiting est géré dans linkedin-api.ts (guard 15 min).
+ * Ici on ajoute un délai initial variable (2–6s) pour simuler le fait
+ * que l'utilisateur vient d'ouvrir /messaging et commence à scroller.
+ */
+async function syncMessagesViaApi(mode: "week" | "all"): Promise<{ updated: number; apiError?: string }> {
+  // Délai initial humanisé avant le premier appel API
+  const initialDelay = 2000 + Math.floor(Math.random() * 4000);
+  await new Promise((r) => setTimeout(r, initialDelay));
+  const csrfToken = await getLinkedInCsrfToken();
+  if (!csrfToken) {
+    return { updated: 0, apiError: "Pas de session LinkedIn — ouvre linkedin.com d'abord" };
+  }
+
+  const allProspects = await getProspects();
+
+  // Filtrer selon le mode
+  const cutoff = mode === "week" ? Date.now() - 7 * 24 * 60 * 60 * 1000 : 0;
+  const targetProspects = mode === "week"
+    ? allProspects.filter((p) => {
+        if (p.messageSentAt && new Date(p.messageSentAt).getTime() >= cutoff) return true;
+        if (p.connectionAcceptedAt && new Date(p.connectionAcceptedAt).getTime() >= cutoff) return true;
+        if (!p.messageSentAt && new Date(p.createdAt).getTime() >= cutoff) return true;
+        return false;
+      })
+    : allProspects;
+
+  // Extraire les slugs LinkedIn depuis les URLs
+  const slugToProspect = new Map<string, Prospect>();
+  for (const p of targetProspects) {
+    const match = p.profileUrl.match(/\/in\/([^/?#]+)/);
+    if (match?.[1]) slugToProspect.set(match[1], p);
+  }
+
+  if (slugToProspect.size === 0) return { updated: 0 };
+
+  const targetSlugs = new Set(slugToProspect.keys());
+  const maxPages = mode === "week" ? 5 : 15;
+
+  let found: Awaited<ReturnType<typeof findProspectsInConversations>>;
+  try {
+    found = await findProspectsInConversations(csrfToken, targetSlugs, maxPages);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[LK Tracker] Voyager sync error:", err);
+    return { updated: 0, apiError: msg };
+  }
+
+  let updated = 0;
+  for (const conv of found) {
+    const recorded = await recordMessage(conv.profileUrl);
+    if (recorded) updated++;
+  }
+
+  return { updated };
+}
+
 export async function recordInvitation(profileData: {
   name: string;
   profileUrl: string;
@@ -436,7 +507,10 @@ export async function recordInvitation(profileData: {
 }
 
 /** Enregistre le premier message uniquement — no-op si déjà messageSentAt. */
-export async function recordMessage(profileUrl: string): Promise<Prospect | null> {
+export async function recordMessage(
+  profileUrl: string,
+  firstMessageType?: "video" | "text"
+): Promise<Prospect | null> {
   const settings = await getSettings();
   if (!settings.trackingEnabled) return null;
 
@@ -450,6 +524,7 @@ export async function recordMessage(profileUrl: string): Promise<Prospect | null
 
   return await updateProspect(existing.id, {
     status: PROSPECT_STATUSES.MESSAGE_SENT,
+    firstMessageType: firstMessageType ?? undefined,
     messageSentAt: now.toISOString(),
     followUpDate: followUp.toISOString(),
   });

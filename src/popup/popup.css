@@ -384,15 +384,98 @@ body.window-mode .prospect-list-scroll {
   line-height: 1.35;
 }
 
-.prospect-status {
-  display: inline-block;
+.prospect-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 4px;
-  padding: 2px 8px;
+}
+
+.prospect-status-select {
+  padding: 2px 6px;
   border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
   background: #e8f4fc;
   color: #0a66c2;
+  border: 1px solid #d0e4f0;
+  cursor: pointer;
+  outline: none;
+}
+
+.prospect-status-select:hover {
+  border-color: #0a66c2;
+}
+
+.prospect-status-select:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.msg-type-badge {
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+}
+
+/* Stats */
+.stats-content {
+  padding: 8px 12px;
+}
+
+.stat-section {
+  margin-bottom: 10px;
+}
+
+.stat-section:last-child {
+  margin-bottom: 0;
+}
+
+.stat-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #444;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 2px 0;
+  color: #555;
+}
+
+.stat-row strong {
+  color: #222;
+}
+
+.stat-row.stat-total {
+  border-top: 1px solid #e8e8e8;
+  margin-top: 2px;
+  padding-top: 4px;
+  font-weight: 600;
+}
+
+.stat-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 6px;
+  background: #eee;
+}
+
+.stat-bar-video {
+  background: #e74c3c;
+  transition: width 0.3s;
+}
+
+.stat-bar-text {
+  background: #3498db;
+  transition: width 0.3s;
 }
 
 .prospect-actions {

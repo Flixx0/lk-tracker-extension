@@ -1,5 +1,5 @@
 import { daysBetween, isOnOrBefore, isSameDay } from "./dates";
-import type { PipelineTab, Prospect, TodayScope } from "./types";
+import type { MessageTypeScope, PipelineTab, Prospect, TodayScope } from "./types";
 import { PROSPECT_STATUSES } from "./types";
 
 export function isInvitationPending(p: Prospect): boolean {
@@ -12,6 +12,13 @@ export function isToContact(p: Prospect): boolean {
 
 export function hasFirstMessage(p: Prospect): boolean {
   return Boolean(p.messageSentAt);
+}
+
+export function matchesMessageType(p: Prospect, scope: MessageTypeScope): boolean {
+  if (scope === "all") return true;
+  if (scope === "video") return p.firstMessageType === "video";
+  if (scope === "text") return p.firstMessageType === "text";
+  return hasFirstMessage(p) && !p.firstMessageType;
 }
 
 export function isFollowUpDue(p: Prospect, now = new Date()): boolean {
@@ -50,6 +57,7 @@ export function matchesTab(
   p: Prospect,
   tab: PipelineTab,
   todayScope: TodayScope = "created",
+  messageTypeScope: MessageTypeScope = "all",
   now = new Date()
 ): boolean {
   switch (tab) {
@@ -62,7 +70,7 @@ export function matchesTab(
     case "to_contact":
       return isToContact(p);
     case "first_message":
-      return hasFirstMessage(p);
+      return hasFirstMessage(p) && matchesMessageType(p, messageTypeScope);
     case "follow_up":
       return isFollowUpDue(p, now);
     case "followed_up":
@@ -85,6 +93,9 @@ export function tabCounts(prospects: Prospect[], now = new Date()) {
     todayMessaged: 0,
     todayUpdated: 0,
     overdueFollowUps: 0,
+    videoMessages: 0,
+    textMessages: 0,
+    unknownMessages: 0,
   };
 
   for (const p of prospects) {
@@ -98,7 +109,12 @@ export function tabCounts(prospects: Prospect[], now = new Date()) {
     if (matchesToday(p, "updated", now)) counts.todayUpdated += 1;
     if (isInvitationPending(p)) counts.invites += 1;
     if (isToContact(p)) counts.to_contact += 1;
-    if (hasFirstMessage(p)) counts.first_message += 1;
+    if (hasFirstMessage(p)) {
+      counts.first_message += 1;
+      if (p.firstMessageType === "video") counts.videoMessages += 1;
+      else if (p.firstMessageType === "text") counts.textMessages += 1;
+      else counts.unknownMessages += 1;
+    }
     if (isFollowUpDue(p, now)) {
       counts.follow_up += 1;
       if (p.followUpDate) {
@@ -120,7 +136,9 @@ export function searchProspects(prospects: Prospect[], query: string): Prospect[
       p.name.toLowerCase().includes(q) ||
       (p.jobTitle ?? "").toLowerCase().includes(q) ||
       p.profileUrl.toLowerCase().includes(q) ||
-      p.status.toLowerCase().includes(q)
+      p.status.toLowerCase().includes(q) ||
+      (p.firstMessageType === "video" && (q === "video" || q === "vidéo")) ||
+      (p.firstMessageType === "text" && (q === "text" || q === "texte"))
     );
   });
 }

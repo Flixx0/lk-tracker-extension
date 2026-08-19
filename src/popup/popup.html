@@ -68,8 +68,11 @@
         <button type="button" id="sync-connections" class="btn btn-secondary">
           Sync connexions
         </button>
-        <button type="button" id="sync-messages" class="btn btn-secondary">
-          Sync messages
+        <button type="button" id="sync-messages-week" class="btn btn-secondary">
+          Messages · 7 jours
+        </button>
+        <button type="button" id="sync-messages-all" class="btn btn-secondary">
+          Messages · tous
         </button>
         <button type="button" id="export-excel" class="btn btn-primary">
           Export Excel
@@ -93,6 +96,11 @@
           <ul id="prospect-list" class="prospect-list-scroll"></ul>
         </details>
       </section>
+
+      <details class="prospect-accordion" id="stats-accordion">
+        <summary>Statistiques</summary>
+        <div id="stats-content" class="stats-content"></div>
+      </details>
 
       <details class="popup-settings">
         <summary>Paramètres</summary>

@@ -2188,10 +2188,92 @@ export function parseMessagingThreadsFromPage(): Array<{ name: string; profileUr
     .map(({ name, profileUrl }) => ({ name, profileUrl }));
 }
 
+/**
+ * Détecte si le premier message sortant dans le thread ouvert contient une vidéo.
+ * Retourne "video" si un élément vidéo/media est trouvé, "text" sinon.
+ */
+export function detectFirstOutgoingMessageType(): "video" | "text" | null {
+  // Messages sortants dans LinkedIn messaging
+  const outgoingSelectors = [
+    ".msg-s-message-list__event .msg-s-event-listitem--other",
+    ".msg-s-event-listitem--other",
+    "[class*='msg-s-event'][class*='other']",
+    ".msg-s-message-group--other .msg-s-event-listitem",
+  ];
+
+  // Fallback : tous les messages et chercher ceux qui sont "de moi"
+  const allMessageSelectors = [
+    ".msg-s-event-listitem",
+    "[class*='msg-s-event-listitem']",
+    ".msg-s-message-list-content li",
+  ];
+
+  let firstOutgoing: Element | null = null;
+
+  for (const sel of outgoingSelectors) {
+    const items = document.querySelectorAll(sel);
+    if (items.length > 0) {
+      firstOutgoing = items[0];
+      break;
+    }
+  }
+
+  // Si pas trouvé avec les sélecteurs "other" (mon message), essayer d'analyser
+  // tous les messages et trouver le premier qui n'est pas "inbound"
+  if (!firstOutgoing) {
+    for (const sel of allMessageSelectors) {
+      const items = document.querySelectorAll(sel);
+      for (const item of Array.from(items)) {
+        const isInbound =
+          item.classList.contains("msg-s-event-listitem--inbound") ||
+          item.closest("[class*='inbound']") !== null;
+        if (!isInbound) {
+          firstOutgoing = item;
+          break;
+        }
+      }
+      if (firstOutgoing) break;
+    }
+  }
+
+  if (!firstOutgoing) return null;
+
+  // Chercher des éléments vidéo dans ce message
+  const videoIndicators = [
+    "video",
+    "[class*='video']",
+    "[class*='media-player']",
+    "[class*='video-player']",
+    ".msg-s-event-listitem__video",
+    "[data-test-id*='video']",
+    "[aria-label*='vidéo']",
+    "[aria-label*='video']",
+    "iframe[src*='video']",
+    ".media-player",
+    "[class*='gif']",
+    "img[class*='video-thumbnail']",
+    "[class*='attachment'][class*='video']",
+  ];
+
+  for (const sel of videoIndicators) {
+    if (firstOutgoing.querySelector(sel)) return "video";
+  }
+
+  // Chercher le texte "Vidéo" ou "Video" dans les sous-éléments de type
+  const innerText = firstOutgoing.textContent ?? "";
+  if (/\bvid[eé]o\b/i.test(innerText) && innerText.length < 200) {
+    // Court message contenant "video" → probablement un label de vidéo, pas du texte
+    return "video";
+  }
+
+  return "text";
+}
+
 /** Ouvre une conversation et extrait l'URL profil du header du thread */
 export async function extractProfileFromOpenThread(): Promise<{
   name: string;
   profileUrl: string;
+  firstMessageType?: "video" | "text";
 } | null> {
   const selectors = [
     ".msg-thread__link-to-profile[href*='/in/']",
@@ -2231,7 +2313,8 @@ export async function extractProfileFromOpenThread(): Promise<{
         profileUrl.split("/in/")[1] ||
         "Unknown";
 
-      return { name, profileUrl };
+      const firstMessageType = detectFirstOutgoingMessageType() ?? undefined;
+      return { name, profileUrl, firstMessageType };
     }
     await sleep(400);
   }
@@ -2242,82 +2325,135 @@ export async function extractProfileFromOpenThread(): Promise<{
 export interface CollectMessagingOptions {
   maxThreadOpens?: number;
   maxScrolls?: number;
-  /** Si false, n'ouvre pas le thread (ex. déjà matché par nom). Défaut: ouvrir. */
-  shouldOpenThread?: (name: string) => boolean;
+  /**
+   * Noms normalisés des prospects à cibler.
+   * On n'ouvre QUE les threads dont le nom matche un prospect connu.
+   */
+  targetNames?: Set<string>;
+  /**
+   * URLs de profils connus des prospects cibles (pour stop anticipé).
+   */
+  targetUrls?: Set<string>;
+}
+
+export interface CollectedMessagingEntry {
+  name: string;
+  profileUrl: string;
+  firstMessageType?: "video" | "text";
 }
 
 /**
- * Collecte les participants : match liste + ouverture des threads sans /in/.
- * maxThreadOpens limite le nombre de clics (anti-429).
+ * Collecte les participants de messagerie en ciblant uniquement les prospects connus.
+ *
+ * Stratégie :
+ * 1. Scroll progressif de la liste de conversations
+ * 2. Pour chaque conversation visible dont le nom matche un prospect cible →
+ *    ouvrir ce thread pour récupérer l'URL /in/ et le type de message
+ * 3. Arrêt anticipé si tous les prospects cibles sont trouvés
  */
 export async function collectMessagingParticipantsForSync(
   options: CollectMessagingOptions | number = {}
-): Promise<Array<{ name: string; profileUrl: string }>> {
+): Promise<CollectedMessagingEntry[]> {
   const opts: CollectMessagingOptions =
     typeof options === "number" ? { maxThreadOpens: options } : options;
-  const maxThreadOpens = opts.maxThreadOpens ?? 12;
-  const maxScrolls = opts.maxScrolls ?? 14;
-  const shouldOpenThread = opts.shouldOpenThread ?? (() => true);
+  const maxThreadOpens = opts.maxThreadOpens ?? 20;
+  const maxScrolls = opts.maxScrolls ?? 16;
+  const targetNames = opts.targetNames; // noms normalisés des prospects à chercher
+  const targetUrls = opts.targetUrls;  // URLs connues pour stop anticipé
 
   await waitForMessagingList();
-  await humanDelay(800, 2000);
-  await scrollMessagingList(maxScrolls);
+  await humanDelay(600, 1400);
 
-  const entries = parseMessagingConversationsFromPage();
-  console.log(`[LK Tracker] ${entries.length} entrées conversation parsées`);
-
-  const results: Array<{ name: string; profileUrl: string }> = [];
+  const results: CollectedMessagingEntry[] = [];
   const seenUrls = new Set<string>();
+  const foundNames = new Set<string>(); // noms déjà trouvés (évite double ouverture)
+  let opened = 0;
 
-  const add = (name: string, profileUrl: string): void => {
+  const add = (name: string, profileUrl: string, firstMessageType?: "video" | "text"): void => {
     if (seenUrls.has(profileUrl)) return;
     seenUrls.add(profileUrl);
-    results.push({ name, profileUrl });
+    results.push({ name, profileUrl, firstMessageType });
   };
 
-  for (const entry of entries) {
-    if (entry.profileUrl) add(entry.name, entry.profileUrl);
-  }
+  const allFound = (): boolean => {
+    if (!targetUrls || targetUrls.size === 0) return false;
+    return Array.from(targetUrls).every((u) => seenUrls.has(u));
+  };
 
-  // Ouvrir les threads sans lien profil pour récupérer /in/ — rythme humain
-  let opened = 0;
-  for (const entry of entries) {
-    if (entry.profileUrl) continue;
-    if (!shouldOpenThread(entry.name)) continue;
-    if (opened >= maxThreadOpens) break;
-    if (!entry.element) continue;
+  // Scroll progressif — on inspecte après chaque scroll
+  const listRoot = findMessagingListRoot();
 
-    try {
-      await humanPause("click");
-      clickConversationCard(entry.element);
-      opened++;
-      await humanPause("read");
+  for (let scroll = 0; scroll <= maxScrolls; scroll++) {
+    if (scroll > 0) {
+      // Scroll d'un cran
+      try {
+        const scrollable = listRoot.closest("[class*='scroll']") ?? listRoot.parentElement ?? listRoot;
+        scrollable.scrollBy({ top: 400, behavior: "smooth" });
+      } catch {
+        /* ignore */
+      }
+      await humanPause("scroll");
+    }
 
-      const extracted = await extractProfileFromOpenThread();
-      if (extracted) add(extracted.name || entry.name, extracted.profileUrl);
+    const entries = parseMessagingConversationsFromPage();
 
-      // Toutes les 3–4 ouvertures : pause plus longue
-      if (opened % 3 === 0) await humanPause("betweenBatches");
-    } catch (err) {
-      console.warn("[LK Tracker] Ouverture thread échouée:", err);
-      await humanDelay(2000, 5000);
+    for (const entry of entries) {
+      // Si l'URL est déjà connue dans la liste, on l'ajoute directement
+      if (entry.profileUrl && !seenUrls.has(entry.profileUrl)) {
+        // Vérifier si c'est un prospect ciblé (par URL)
+        const isTargetUrl = !targetUrls || targetUrls.has(entry.profileUrl);
+        // Vérifier si c'est un prospect ciblé (par nom)
+        const normName = entry.name ? normalizeMessagingName(entry.name) : "";
+        const isTargetName = !targetNames || targetNames.has(normName);
+
+        if (isTargetUrl && entry.profileUrl) {
+          add(entry.name, entry.profileUrl);
+          foundNames.add(normName);
+          continue;
+        }
+
+        // Nom connu mais pas d'URL → ouvrir le thread pour récupérer l'URL + type
+        if (isTargetName && normName && !foundNames.has(normName) && entry.element) {
+          if (opened >= maxThreadOpens) continue;
+          foundNames.add(normName);
+
+          try {
+            await humanPause("click");
+            clickConversationCard(entry.element);
+            opened++;
+            await humanPause("read");
+
+            const extracted = await extractProfileFromOpenThread();
+            if (extracted) {
+              add(extracted.name || entry.name, extracted.profileUrl, extracted.firstMessageType);
+            }
+
+            if (opened % 3 === 0) await humanPause("betweenBatches");
+          } catch (err) {
+            console.warn("[LK Tracker] Ouverture thread échouée:", err);
+            await humanDelay(1500, 4000);
+          }
+        }
+      }
+    }
+
+    if (allFound()) {
+      console.log("[LK Tracker] Tous les prospects ciblés trouvés — arrêt anticipé");
+      break;
     }
   }
 
-  // Dernier filet : tous les /in/ visibles après navigation
-  for (const anchor of Array.from(
-    document.querySelectorAll<HTMLAnchorElement>("a[href*='/in/']")
-  )) {
-    if (!anchor.href || anchor.href.includes("/company/")) continue;
-    const profileUrl = profileUrlFromHref(anchor.href);
-    if (!profileUrl) continue;
-    const name =
-      anchor.getAttribute("aria-label")?.trim() ||
-      anchor.textContent?.trim().replace(/\s+/g, " ") ||
-      profileUrl.split("/in/")[1] ||
-      "";
-    if (name.length >= 2) add(name, profileUrl);
-  }
-
+  console.log(`[LK Tracker] collectMessaging: ${results.length} prospects trouvés, ${opened} threads ouverts`);
   return results;
+}
+
+/** Normalise un nom pour la comparaison (même logique que messaging.ts) */
+function normalizeMessagingName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

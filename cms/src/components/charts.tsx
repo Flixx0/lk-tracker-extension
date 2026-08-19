@@ -80,6 +80,82 @@ export function Funnel({ items }: { items: { label: string; value: number }[] })
   );
 }
 
+export function StackedShare({
+  segments,
+}: {
+  segments: { label: string; count: number; className: string }[];
+}) {
+  const total = segments.reduce((sum, s) => sum + s.count, 0);
+  if (total === 0) return <p className="text-sm text-muted">Aucun message typé</p>;
+  return (
+    <div>
+      <div className="flex h-3 overflow-hidden rounded-full">
+        {segments.map((s) =>
+          s.count > 0 ? (
+            <div
+              key={s.label}
+              className={s.className}
+              style={{ width: `${(s.count / total) * 100}%` }}
+              title={`${s.label} : ${s.count}`}
+            />
+          ) : null
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-4 text-sm">
+        {segments.map((s) => (
+          <div key={s.label} className="flex items-center gap-2">
+            <span className={`size-2.5 rounded-full ${s.className}`} />
+            <span>
+              {s.label}{" "}
+              <strong className="tabular-nums">{s.count}</strong>
+              <span className="text-muted"> ({Math.round((s.count / total) * 100)}%)</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function MessageTypeChart({
+  days,
+}: {
+  days: { day: string; video: number; text: number }[];
+}) {
+  const max = Math.max(1, ...days.map((d) => d.video + d.text));
+  return (
+    <div>
+      <div className="flex h-36 items-end gap-1">
+        {days.map((d) => {
+          const total = d.video + d.text;
+          const h = Math.max(total ? 8 : 2, (total / max) * 100);
+          return (
+            <div
+              key={d.day}
+              title={`${d.day} — ${d.video} vidéo, ${d.text} texte`}
+              className="flex flex-1 flex-col justify-end"
+              style={{ height: "100%" }}
+            >
+              <div className="flex w-full flex-col overflow-hidden rounded-t" style={{ height: `${h}%` }}>
+                {d.video > 0 ? <div className="w-full bg-violet-600" style={{ flexGrow: d.video }} /> : null}
+                {d.text > 0 ? <div className="w-full bg-sky-500" style={{ flexGrow: d.text }} /> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex justify-between text-[10px] text-muted">
+        <span>{days[0]?.day.slice(5)}</span>
+        <span className="flex gap-3">
+          <span>Vidéo</span>
+          <span>Texte</span>
+        </span>
+        <span>{days.at(-1)?.day.slice(5)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function ActivityChart({
   days,
 }: {

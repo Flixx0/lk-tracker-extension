@@ -1,4 +1,8 @@
-import type { DbRow, Prospect, ProspectPatch } from "./types";
+import type { DbRow, FirstMessageType, Prospect, ProspectPatch } from "./types";
+
+function parseMessageType(value: string | null | undefined): FirstMessageType | undefined {
+  return value === "video" || value === "text" ? value : undefined;
+}
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY =
@@ -76,6 +80,7 @@ export function rowToProspect(row: DbRow): Prospect {
     jobTitle: row.job_title ?? undefined,
     jobTitleCandidates: row.job_title_candidates ?? undefined,
     status: row.status as Prospect["status"],
+    firstMessageType: parseMessageType(row.first_message_type),
     invitationSentAt: row.invitation_sent_at ?? undefined,
     connectionAcceptedAt: row.connection_accepted_at ?? undefined,
     messageSentAt: row.message_sent_at ?? undefined,
@@ -121,6 +126,7 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
   if (patch.name !== undefined) dbPatch.name = patch.name;
   if (patch.jobTitle !== undefined) dbPatch.job_title = patch.jobTitle;
   if (patch.status !== undefined) dbPatch.status = patch.status;
+  if (patch.firstMessageType !== undefined) dbPatch.first_message_type = patch.firstMessageType;
   if (patch.invitationSentAt !== undefined) dbPatch.invitation_sent_at = patch.invitationSentAt;
   if (patch.connectionAcceptedAt !== undefined)
     dbPatch.connection_accepted_at = patch.connectionAcceptedAt;
@@ -141,6 +147,12 @@ export async function patchProspect(id: string, patch: ProspectPatch): Promise<P
   } catch (err) {
     if (patch.followUpSentAt !== undefined && isUnknownColumnError(err, "follow_up_sent_at")) {
       const { follow_up_sent_at: _ignored, ...rest } = dbPatch;
+      rows = await send(rest);
+    } else if (
+      patch.firstMessageType !== undefined &&
+      isUnknownColumnError(err, "first_message_type")
+    ) {
+      const { first_message_type: _ignored, ...rest } = dbPatch;
       rows = await send(rest);
     } else {
       throw err;

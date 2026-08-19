@@ -2,9 +2,9 @@
 
 import { ExternalLink, X } from "lucide-react";
 import { dateInputToIso, formatDateTime, relativeLabel, toDateInput } from "@/lib/dates";
-import { STATUS_LABELS, STATUS_ORDER, type Prospect, type ProspectPatch, type ProspectStatus } from "@/lib/types";
+import { STATUS_LABELS, STATUS_ORDER, type FirstMessageType, type Prospect, type ProspectPatch, type ProspectStatus } from "@/lib/types";
 import { Avatar } from "./avatar";
-import { StatusBadge } from "./status-badge";
+import { MessageTypeBadge, StatusBadge } from "./status-badge";
 
 export function ProspectDrawer({
   prospect,
@@ -23,9 +23,13 @@ export function ProspectDrawer({
     const data = new FormData(form);
     const status = String(data.get("status")) as ProspectStatus;
     const jobTitle = String(data.get("jobTitle") ?? "").trim();
+    const rawType = String(data.get("firstMessageType") ?? "");
+    const firstMessageType: FirstMessageType | null =
+      rawType === "video" || rawType === "text" ? rawType : null;
     await onSave({
       status,
       jobTitle: jobTitle || null,
+      firstMessageType,
       invitationSentAt: dateInputToIso(String(data.get("invitationSentAt") ?? ""), prospect.invitationSentAt),
       connectionAcceptedAt: dateInputToIso(
         String(data.get("connectionAcceptedAt") ?? ""),
@@ -45,8 +49,9 @@ export function ProspectDrawer({
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold">{prospect.name}</h2>
             <p className="truncate text-sm text-muted">{prospect.jobTitle || "Poste inconnu"}</p>
-            <div className="mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <StatusBadge status={prospect.status} />
+              <MessageTypeBadge type={prospect.firstMessageType} />
             </div>
           </div>
         </div>
@@ -105,6 +110,18 @@ export function ProspectDrawer({
           <DateField name="invitationSentAt" label="Invitation envoyée" value={prospect.invitationSentAt} />
           <DateField name="connectionAcceptedAt" label="Connexion acceptée" value={prospect.connectionAcceptedAt} />
           <DateField name="messageSentAt" label="Premier message" value={prospect.messageSentAt} />
+          <label className="text-sm font-medium">
+            Type du 1er message
+            <select
+              name="firstMessageType"
+              defaultValue={prospect.firstMessageType ?? ""}
+              className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 text-sm outline-none ring-accent/20 focus:ring-4"
+            >
+              <option value="">Non détecté</option>
+              <option value="video">Vidéo</option>
+              <option value="text">Texte</option>
+            </select>
+          </label>
           <DateField name="followUpDate" label="Date de relance" value={prospect.followUpDate} />
           <DateField name="followUpSentAt" label="Relance envoyée" value={prospect.followUpSentAt} />
 

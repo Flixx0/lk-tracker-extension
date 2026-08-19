@@ -1,11 +1,8 @@
-import {
-  collectMessagingParticipantsForSync,
-  parseMessagingConversationsFromPage,
-  waitForMessagingList,
-} from "../shared/linkedin-dom";
+import { waitForMessagingList } from "../shared/linkedin-dom";
 import { isExtensionContextValid } from "../shared/extension-context";
 import { logActivity } from "../shared/log-activity";
 import { sendToBackground } from "../shared/messaging";
+import { showSyncBanner, hideSyncBanner } from "../shared/sync-banner";
 import type { ExtensionMessage, Prospect } from "../shared/types";
 
 const PENDING_MESSAGES_SYNC_KEY = "lkPendingMessagesSync";
@@ -20,15 +17,6 @@ async function isTrackingEnabled(): Promise<boolean> {
   return settings?.trackingEnabled ?? false;
 }
 
-function normalizePersonName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function extractProfileUrlFromMessaging(): string | null {
   const selectors = [
@@ -95,42 +83,17 @@ function attachMessageListeners(): void {
   }
 }
 
-function matchProspectsByConversationNames(
-  prospects: Prospect[],
-  conversations: Array<{ name: string; profileUrl?: string }>
-): Array<{ name: string; profileUrl: string }> {
-  const byName = new Map<string, Prospect>();
-  for (const p of prospects) {
-    byName.set(normalizePersonName(p.name), p);
-  }
 
-  const matched: Array<{ name: string; profileUrl: string }> = [];
-  const seen = new Set<string>();
+export type MessagesSyncMode = "week" | "all";
 
-  for (const conv of conversations) {
-    if (conv.profileUrl) {
-      if (seen.has(conv.profileUrl)) continue;
-      seen.add(conv.profileUrl);
-      matched.push({ name: conv.name, profileUrl: conv.profileUrl });
-      continue;
-    }
-
-    const prospect = byName.get(normalizePersonName(conv.name));
-    if (!prospect) continue;
-    if (seen.has(prospect.profileUrl)) continue;
-    seen.add(prospect.profileUrl);
-    matched.push({ name: prospect.name, profileUrl: prospect.profileUrl });
-  }
-
-  return matched;
-}
-
-async function syncMessages(): Promise<void> {
+async function syncMessages(mode: MessagesSyncMode = "all"): Promise<void> {
   if (window !== window.top) return;
   if (syncRunning) return;
   if (!isExtensionContextValid()) return;
 
   syncRunning = true;
+
+  const modeLabel = mode === "week" ? "dernière semaine" : "tous les prospects";
 
   try {
     const settings = await sendToBackground<{ trackingEnabled: boolean }>({
@@ -141,97 +104,34 @@ async function syncMessages(): Promise<void> {
       return;
     }
 
-    await logActivity("Sync messages en cours…", "LK Tracker", false, true);
-    console.log("[LK Tracker] Début sync messages…", location.pathname);
+    showSyncBanner(`LK Tracker — Sync messages (${modeLabel})…`);
+    await logActivity(`Sync messages (${modeLabel})…`, "LK Tracker", false, true);
+    console.log("[LK Tracker] Sync messages via Voyager API, mode:", mode);
 
-    const listReady = await waitForMessagingList(18000);
-    if (!listReady) {
-      console.warn("[LK Tracker] Liste messages introuvable dans le DOM");
-      await logActivity(
-        "Aucune conversation trouvée — ouvre /messaging et réessaie",
-        "LK Tracker — sync",
-        true
-      );
-      return;
-    }
+    // Attendre que la page /messaging soit chargée (pour que les cookies soient actifs)
+    await waitForMessagingList(10000).catch(() => {});
 
-    const prospects =
-      (await sendToBackground<Prospect[]>({ type: "GET_PROSPECTS" })) ?? [];
-    const prospectNameSet = new Set(
-      prospects.map((p) => normalizePersonName(p.name))
-    );
-
-    // Collecte : scroll + match noms + ouverture threads non matchés (rythme humain)
-    const fromDom = await collectMessagingParticipantsForSync({
-      maxThreadOpens: 12,
-      maxScrolls: 14,
-      shouldOpenThread: (name) => !prospectNameSet.has(normalizePersonName(name)),
-    });
-    console.log(`[LK Tracker] ${fromDom.length} profils via DOM/threads`);
-
-    const named = parseMessagingConversationsFromPage();
-    const fromNames = matchProspectsByConversationNames(prospects, named);
-    console.log(
-      `[LK Tracker] ${named.length} convos parsées, ${fromNames.length} match nom`
-    );
-
-    const byUrl = new Map<string, { name: string; profileUrl: string }>();
-    for (const item of [...fromDom, ...fromNames]) {
-      byUrl.set(item.profileUrl, item);
-    }
-    // Ne garder que les prospects déjà en base
-    const prospectUrls = new Set(prospects.map((p) => p.profileUrl));
-    const threads = Array.from(byUrl.values()).filter((t) => {
-      const normalized = t.profileUrl.replace(/\/$/, "");
-      return (
-        prospectUrls.has(t.profileUrl) ||
-        prospectUrls.has(normalized) ||
-        prospects.some(
-          (p) =>
-            p.profileUrl.includes(`/in/${t.profileUrl.split("/in/")[1]}`) ||
-            normalizePersonName(p.name) === normalizePersonName(t.name)
-        )
-      );
-    });
-    console.log(`[LK Tracker] ${threads.length} conversations uniques à sync`);
-
-    if (threads.length === 0 && named.length === 0 && fromDom.length === 0) {
-      console.warn("[LK Tracker] Debug messaging DOM:", {
-        path: location.pathname,
-        listItems: document.querySelectorAll(
-          ".msg-conversation-listitem, a[href*='/messaging/thread/']"
-        ).length,
-        inLinks: document.querySelectorAll("a[href*='/in/']").length,
-        namedConversations: named.length,
-      });
-      await logActivity("Aucune conversation trouvée sur la page", "LK Tracker — sync", true);
-      return;
-    }
-
-    if (threads.length === 0) {
-      await logActivity(
-        `${named.length || fromDom.length} convos vues, 0 prospect en base à mettre à jour`,
-        "LK Tracker — sync"
-      );
-      void sendToBackground({
-        type: "MESSAGES_SYNC_DONE",
-        payload: { updated: 0 },
-      });
-      return;
-    }
-
-    const result = await sendToBackground<{ updated: number }>({
+    // Le service worker fait l'appel Voyager API directement (plus fiable que le DOM)
+    const result = await sendToBackground<{ updated: number; apiError?: string }>({
       type: "SYNC_MESSAGES",
-      payload: threads,
+      payload: { mode },
     });
 
     if (!result) {
-      await logActivity("Sync messages échouée — rafraîchis la page (F5)", "LK Tracker — erreur", true);
+      hideSyncBanner("Sync messages échouée", true);
+      await logActivity("Sync messages échouée", "LK Tracker — erreur", true);
+      return;
+    }
+
+    if (result.apiError) {
+      hideSyncBanner(`Erreur API: ${result.apiError}`, true);
+      await logActivity(`Sync messages erreur: ${result.apiError}`, "LK Tracker — erreur", true);
       return;
     }
 
     console.log(`[LK Tracker] ${result.updated} prospects mis à jour (message envoyé)`);
 
+    hideSyncBanner(`✓ Sync messages : ${result.updated} prospect(s) mis à jour`);
     await logActivity(
       `Sync messages : ${result.updated} prospect(s) → message envoyé`,
       "LK Tracker — sync"
@@ -241,6 +141,9 @@ async function syncMessages(): Promise<void> {
       type: "MESSAGES_SYNC_DONE",
       payload: result,
     });
+  } catch (err) {
+    hideSyncBanner("Sync messages échouée", true);
+    throw err;
   } finally {
     syncRunning = false;
   }
@@ -251,12 +154,16 @@ async function maybeAutoSyncMessages(): Promise<void> {
 
   try {
     const flag = await chrome.storage.local.get(PENDING_MESSAGES_SYNC_KEY);
-    if (!flag[PENDING_MESSAGES_SYNC_KEY]) return;
+    const flagValue = flag[PENDING_MESSAGES_SYNC_KEY];
+    if (!flagValue) return;
     await chrome.storage.local.remove(PENDING_MESSAGES_SYNC_KEY);
-    console.log("[LK Tracker] Auto-sync messages (flag popup)");
+
+    const mode: MessagesSyncMode =
+      typeof flagValue === "object" && flagValue?.mode === "week" ? "week" : "all";
+    console.log("[LK Tracker] Auto-sync messages (flag popup), mode:", mode);
     // LinkedIn messaging charge la liste en lazy — laisser plus de temps
     setTimeout(() => {
-      syncMessages().catch((err) => console.error("[LK Tracker] syncMessages:", err));
+      syncMessages(mode).catch((err) => console.error("[LK Tracker] syncMessages:", err));
     }, 4000);
   } catch (err) {
     console.error("[LK Tracker] maybeAutoSyncMessages:", err);
@@ -270,9 +177,15 @@ function initMessagingHandlers(): void {
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
-  if (message.type === "TRIGGER_MESSAGES_SYNC" || message.type === "SYNC_MESSAGES") {
+  if (message.type === "TRIGGER_MESSAGES_SYNC") {
+    const payload = message.payload as { mode?: MessagesSyncMode } | undefined;
+    const mode: MessagesSyncMode = payload?.mode ?? "all";
+    syncMessages(mode).catch((err) => console.error("[LK Tracker] syncMessages:", err));
+  }
+  if (message.type === "SYNC_MESSAGES") {
+    // SYNC_MESSAGES avec payload = données depuis service worker, on ignore (pas un trigger)
     if (message.payload) return;
-    syncMessages().catch((err) => console.error("[LK Tracker] syncMessages:", err));
+    syncMessages("all").catch((err) => console.error("[LK Tracker] syncMessages:", err));
   }
 });
 
