@@ -1,7 +1,6 @@
 import type { AppSettings, DetectedProfile, ExtensionMessage, Prospect } from "../shared/types";
 import { PROSPECT_STATUSES, STATUS_LABELS } from "../shared/types";
 import { formatProfileForAi } from "../shared/profile-ai-export";
-import { getOAuthRedirectUrl, hasCachedGoogleToken } from "../shared/sheets";
 
 function sendMessage<T>(message: ExtensionMessage): Promise<T> {
   return chrome.runtime.sendMessage(message).then((response) => {
@@ -21,7 +20,6 @@ const toggle = document.getElementById("tracking-toggle") as HTMLInputElement;
 const toggleLabel = document.getElementById("toggle-label")!;
 const syncBtn = document.getElementById("sync-connections")!;
 const syncMessagesBtn = document.getElementById("sync-messages")!;
-const syncSheetBtn = document.getElementById("sync-sheet") as HTMLButtonElement;
 const exportBtn = document.getElementById("export-excel")!;
 const followUpInput = document.getElementById("follow-up-days") as HTMLInputElement;
 const prospectList = document.getElementById("prospect-list")!;
@@ -30,13 +28,6 @@ const toContactList = document.getElementById("to-contact-list")!;
 const toContactCount = document.getElementById("to-contact-count")!;
 const toContactEmpty = document.getElementById("to-contact-empty")!;
 const statusMessage = document.getElementById("status-message")!;
-const spreadsheetInput = document.getElementById("spreadsheet-id") as HTMLInputElement;
-const sheetTabInput = document.getElementById("sheet-tab-name") as HTMLInputElement;
-const googleConnectBtn = document.getElementById("google-connect") as HTMLButtonElement;
-const googleDisconnectBtn = document.getElementById("google-disconnect") as HTMLButtonElement;
-const sheetsStatus = document.getElementById("sheets-status")!;
-const extensionIdEl = document.getElementById("extension-id")!;
-const oauthRedirectUriEl = document.getElementById("oauth-redirect-uri")!;
 
 const currentProfileSection = document.getElementById("current-profile-section")!;
 const noProfileHint = document.getElementById("no-profile-hint")!;
@@ -333,11 +324,7 @@ function createProspectActions(
 
     deleteBtn.disabled = true;
     try {
-      const result = await sendMessage<{
-        ok: boolean;
-        sheetSync?: "skipped" | "deleted" | "not_found" | "error";
-        sheetError?: string;
-      }>({
+      const result = await sendMessage<{ ok: boolean }>({
         type: "DELETE_PROSPECT",
         payload: { id: prospect.id },
       });
@@ -346,16 +333,7 @@ function createProspectActions(
         await loadProspects();
         return;
       }
-      if (result.sheetSync === "error" && result.sheetError) {
-        showStatus(
-          `${prospect.name} supprimé localement — erreur Google Sheet : ${result.sheetError}`,
-          true
-        );
-      } else if (result.sheetSync === "not_found") {
-        showStatus(`${prospect.name} supprimé (ligne absente du sheet)`);
-      } else {
-        showStatus(`${prospect.name} supprimé`);
-      }
+      showStatus(`${prospect.name} supprimé`);
       await loadProspects();
     } catch (err) {
       showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
@@ -487,31 +465,11 @@ function renderProspects(prospects: Prospect[]): void {
   }
 }
 
-function updateSheetsUI(settings: AppSettings): void {
-  if (settings.spreadsheetId) {
-    spreadsheetInput.value = settings.spreadsheetId;
-  }
-  sheetTabInput.value = settings.sheetTabName;
-
-  if (settings.googleConnected && settings.sheetsSyncEnabled) {
-    sheetsStatus.textContent = `Connecté — sync active`;
-    sheetsStatus.classList.add("connected");
-    googleConnectBtn.hidden = true;
-    googleDisconnectBtn.hidden = false;
-  } else {
-    sheetsStatus.textContent = "Non connecté";
-    sheetsStatus.classList.remove("connected");
-    googleConnectBtn.hidden = false;
-    googleDisconnectBtn.hidden = true;
-  }
-}
-
 async function loadSettings(): Promise<void> {
   const settings = await sendMessage<AppSettings>({ type: "GET_SETTINGS" });
   toggle.checked = settings.trackingEnabled;
   toggleLabel.textContent = settings.trackingEnabled ? "On" : "Off";
   followUpInput.value = String(settings.followUpDays);
-  updateSheetsUI(settings);
 }
 
 async function loadProspects(): Promise<void> {
@@ -523,10 +481,10 @@ async function loadProspects(): Promise<void> {
   renderProspects(prospects);
 }
 
-/** Rafraîchit la liste quand un prospect est ajouté depuis LinkedIn (content script). */
+/** Rafraîchit la liste quand le cache local change (après un upsert Supabase). */
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.prospects) return;
-  const next = changes.prospects.newValue;
+  if (area !== "local" || !changes.prospects_cache) return;
+  const next = changes.prospects_cache.newValue;
   if (Array.isArray(next)) {
     renderProspects(next as Prospect[]);
   } else {
@@ -540,54 +498,6 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-async function syncFromSheet(showFeedback = true): Promise<void> {
-  const settings = await sendMessage<AppSettings>({ type: "GET_SETTINGS" });
-  if (!settings.googleConnected || !settings.spreadsheetId) {
-    if (showFeedback) showStatus("Connecte d'abord Google Sheet", true);
-    return;
-  }
-
-  if (showFeedback) {
-    syncSheetBtn.disabled = true;
-    showStatus("Sync Google Sheet (import + export)…");
-  }
-
-  try {
-    const result = await sendMessage<{
-      imported: number;
-      updated: number;
-      total: number;
-      sheetCount: number;
-      pushed?: number;
-      sheetUpdated?: number;
-      sheetAppended?: number;
-    }>({
-      type: "PULL_SHEET_SYNC",
-      payload: {
-        mode: showFeedback ? "full" : "pull",
-        interactive: showFeedback,
-      },
-    });
-
-    await loadProspects();
-    await refreshDetectedProfile();
-
-    if (showFeedback) {
-      const pushed = result.pushed ?? 0;
-      const appended = result.sheetAppended ?? 0;
-      const updatedRows = result.sheetUpdated ?? 0;
-      showStatus(
-        `Sheet sync : ${result.sheetCount} lus → +${result.imported} importés, ${result.updated} maj locales · ${pushed} envoyés (${updatedRows} maj, ${appended} nouveaux)`
-      );
-    }
-  } catch (err) {
-    if (showFeedback) {
-      showStatus(`Erreur sync sheet : ${err instanceof Error ? err.message : String(err)}`, true);
-    }
-  } finally {
-    if (showFeedback) syncSheetBtn.disabled = false;
-  }
-}
 
 copyProfileForAiBtn.addEventListener("click", async () => {
   copyProfileForAiBtn.disabled = true;
@@ -670,58 +580,6 @@ followUpInput.addEventListener("change", async () => {
   });
 });
 
-googleConnectBtn.addEventListener("click", async () => {
-  const spreadsheetId = spreadsheetInput.value.trim();
-  if (!spreadsheetId) {
-    showStatus("Colle l'URL du Google Sheet", true);
-    return;
-  }
-
-  googleConnectBtn.disabled = true;
-  try {
-    const result = await sendMessage<{
-      title: string;
-      tabName: string;
-      synced: number;
-      imported: number;
-      sheetCount: number;
-    }>({
-      type: "GOOGLE_CONNECT",
-      payload: {
-        spreadsheetId,
-        sheetTabName: sheetTabInput.value.trim() || "Feuille 1",
-      },
-    });
-    showStatus(
-      `Connecté à « ${result.title} » — ${result.sheetCount} dans le sheet (+${result.imported} importés), ${result.synced} sync`
-    );
-    await loadSettings();
-    await loadProspects();
-    await refreshDetectedProfile();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/invalid_request|bad client id|custom uri scheme/i.test(msg)) {
-      showStatus(
-        `OAuth Arc/Brave : crée un client « Web application », ajoute l'URI de redirection ci-dessous, puis mets son ID dans manifest → oauth2.web_client_id`,
-        true
-      );
-    } else {
-      showStatus(`Erreur: ${msg}`, true);
-    }
-  } finally {
-    googleConnectBtn.disabled = false;
-  }
-});
-
-googleDisconnectBtn.addEventListener("click", async () => {
-  await sendMessage({ type: "GOOGLE_DISCONNECT" });
-  showStatus("Google déconnecté");
-  await loadSettings();
-});
-
-syncSheetBtn.addEventListener("click", () => {
-  syncFromSheet(true).catch(() => {});
-});
 
 const PANEL_WINDOW_ID_KEY = "lkPanelWindowId";
 
@@ -900,20 +758,9 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   }
 });
 
-if (extensionIdEl && chrome.runtime?.id) {
-  extensionIdEl.textContent = chrome.runtime.id;
-}
-if (oauthRedirectUriEl) {
-  oauthRedirectUriEl.textContent = getOAuthRedirectUrl();
-}
-
 loadSettings();
 loadProspects();
 refreshDetectedProfile();
-// Pull silencieux seulement si un token est déjà en cache — jamais de popup OAuth à l'ouverture
-hasCachedGoogleToken()
-  .then((hasToken) => (hasToken ? syncFromSheet(false) : undefined))
-  .catch(() => {});
 
 openPanelWindowBtn.addEventListener("click", async () => {
   openPanelWindowBtn.disabled = true;

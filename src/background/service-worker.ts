@@ -7,30 +7,24 @@ import {
   findProspectByProfileUrl,
   getProspects,
   getSettings,
-  mergeProspectsFromSheet,
   normalizeProfileUrl,
+  runMigrationIfNeeded,
   setSettings,
   updateProspect,
 } from "../shared/storage";
 import { downloadExcel } from "../shared/export";
-import {
-  extractSpreadsheetId,
-  fetchProspectsFromSheet,
-  getGoogleAuthToken,
-  hasCachedGoogleToken,
-  preferStatus,
-  resolveTabName,
-  revokeGoogleAuthToken,
-  testSheetAccess,
-  upsertProspect,
-  upsertProspects,
-  deleteProspectFromSheet,
-  withGoogleSheetsToken,
-} from "../shared/sheets";
 import { isLikelyConnectionDateText } from "../shared/linkedin-dom";
 
 const PENDING_INVITE_KEY = "pendingInvite";
 const PANEL_WINDOW_ID_KEY = "lkPanelWindowId";
+
+// ─── Migration au démarrage ───────────────────────────────────────────────────
+
+runMigrationIfNeeded().catch((err) =>
+  console.error("[LK Tracker] Migration Supabase:", err)
+);
+
+// ─── Fenêtre panel ────────────────────────────────────────────────────────────
 
 async function openPanelWindow(): Promise<{ ok: true; windowId: number }> {
   const stored = await chrome.storage.local.get(PANEL_WINDOW_ID_KEY);
@@ -94,157 +88,10 @@ chrome.windows.onRemoved.addListener((windowId) => {
   });
 });
 
+// ─── Notifications ────────────────────────────────────────────────────────────
+
 let lastNotificationAt = 0;
 let lastNotificationKey = "";
-
-async function savePendingInviteStorage(invite: PendingInvite): Promise<void> {
-  await chrome.storage.local.set({ [PENDING_INVITE_KEY]: invite });
-}
-
-async function getPendingInviteStorage(): Promise<PendingInvite | null> {
-  const result = await chrome.storage.local.get(PENDING_INVITE_KEY);
-  return result[PENDING_INVITE_KEY] ?? null;
-}
-
-async function clearPendingInviteStorage(): Promise<void> {
-  await chrome.storage.local.remove(PENDING_INVITE_KEY);
-}
-
-chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
-  handleMessage(message).then(sendResponse).catch((err) => {
-    console.error("[LK Tracker]", err);
-    sendResponse({ error: String(err) });
-  });
-  return true;
-});
-
-async function syncProspectToSheet(prospect: Prospect): Promise<void> {
-  const settings = await getSettings();
-  if (!settings.sheetsSyncEnabled || !settings.spreadsheetId) return;
-
-  await withGoogleSheetsToken(async (token) => {
-    const tabName = await resolveTabName(
-      token,
-      settings.spreadsheetId!,
-      settings.sheetTabName
-    );
-    await upsertProspect(token, settings.spreadsheetId!, tabName, prospect);
-  }, false);
-}
-
-async function syncProspectDeletionFromSheet(
-  profileUrl: string
-): Promise<"skipped" | "deleted" | "not_found"> {
-  const settings = await getSettings();
-  if (!settings.sheetsSyncEnabled || !settings.spreadsheetId) return "skipped";
-
-  return withGoogleSheetsToken(async (token) => {
-    const tabName = await resolveTabName(
-      token,
-      settings.spreadsheetId!,
-      settings.sheetTabName
-    );
-    const deleted = await deleteProspectFromSheet(
-      token,
-      settings.spreadsheetId!,
-      tabName,
-      profileUrl
-    );
-    return deleted ? "deleted" : "not_found";
-  }, false);
-}
-
-let lastSheetPullAt = 0;
-const SHEET_PULL_COOLDOWN_MS = 60_000;
-
-async function pullAndMergeFromSheet(
-  force = false,
-  interactiveAuth = false
-): Promise<{
-  imported: number;
-  updated: number;
-  total: number;
-  sheetCount: number;
-}> {
-  const settings = await getSettings();
-  if (!settings.googleConnected || !settings.spreadsheetId) {
-    throw new Error("Google Sheet non connecté");
-  }
-
-  const now = Date.now();
-  if (!force && now - lastSheetPullAt < SHEET_PULL_COOLDOWN_MS) {
-    const local = await getProspects();
-    return { imported: 0, updated: 0, total: local.length, sheetCount: -1 };
-  }
-
-  return withGoogleSheetsToken(async (token) => {
-    const tabName = await resolveTabName(
-      token,
-      settings.spreadsheetId!,
-      settings.sheetTabName
-    );
-    const sheetProspects = await fetchProspectsFromSheet(
-      token,
-      settings.spreadsheetId!,
-      tabName
-    );
-    const result = await mergeProspectsFromSheet(sheetProspects, preferStatus);
-    lastSheetPullAt = Date.now();
-    return { ...result, sheetCount: sheetProspects.length };
-  }, interactiveAuth);
-}
-
-/** Sync complète : sheet → local puis local → sheet. */
-async function syncSheetBidirectional(interactiveAuth = true): Promise<{
-  imported: number;
-  updated: number;
-  total: number;
-  sheetCount: number;
-  pushed: number;
-  sheetUpdated: number;
-  sheetAppended: number;
-}> {
-  const settings = await getSettings();
-  if (!settings.googleConnected || !settings.spreadsheetId) {
-    throw new Error("Google Sheet non connecté");
-  }
-
-  return withGoogleSheetsToken(async (token) => {
-    const spreadsheetId = settings.spreadsheetId!;
-    const tabName = await resolveTabName(token, spreadsheetId, settings.sheetTabName);
-
-    const sheetProspects = await fetchProspectsFromSheet(token, spreadsheetId, tabName);
-    const mergeResult = await mergeProspectsFromSheet(sheetProspects, preferStatus);
-    lastSheetPullAt = Date.now();
-
-    const allProspects = await getProspects();
-    const pushResult = await upsertProspects(token, spreadsheetId, tabName, allProspects);
-
-    return {
-      ...mergeResult,
-      sheetCount: sheetProspects.length,
-      pushed: allProspects.length,
-      sheetUpdated: pushResult.updated,
-      sheetAppended: pushResult.appended,
-    };
-  }, interactiveAuth);
-}
-
-async function pushAllProspectsToSheet(interactiveAuth = false): Promise<number> {
-  const settings = await getSettings();
-  if (!settings.sheetsSyncEnabled || !settings.spreadsheetId) return 0;
-
-  return withGoogleSheetsToken(async (token) => {
-    const tabName = await resolveTabName(
-      token,
-      settings.spreadsheetId!,
-      settings.sheetTabName
-    );
-    const allProspects = await getProspects();
-    await upsertProspects(token, settings.spreadsheetId!, tabName, allProspects);
-    return allProspects.length;
-  }, interactiveAuth);
-}
 
 async function showNotification(title: string, message: string): Promise<void> {
   const settings = await getSettings();
@@ -292,15 +139,41 @@ async function showNotification(title: string, message: string): Promise<void> {
   }
 }
 
+// ─── Pending invite ───────────────────────────────────────────────────────────
+
+async function savePendingInviteStorage(invite: PendingInvite): Promise<void> {
+  await chrome.storage.local.set({ [PENDING_INVITE_KEY]: invite });
+}
+
+async function getPendingInviteStorage(): Promise<PendingInvite | null> {
+  const result = await chrome.storage.local.get(PENDING_INVITE_KEY);
+  return result[PENDING_INVITE_KEY] ?? null;
+}
+
+async function clearPendingInviteStorage(): Promise<void> {
+  await chrome.storage.local.remove(PENDING_INVITE_KEY);
+}
+
+// ─── Message handler ──────────────────────────────────────────────────────────
+
+chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+  handleMessage(message).then(sendResponse).catch((err) => {
+    console.error("[LK Tracker]", err);
+    sendResponse({ error: String(err) });
+  });
+  return true;
+});
+
 async function handleMessage(message: ExtensionMessage): Promise<unknown> {
   switch (message.type) {
-    case "SHOW_NOTIFICATION":
+    case "SHOW_NOTIFICATION": {
       const { title, message: notifMessage } = message.payload as {
         title: string;
         message: string;
       };
       await showNotification(title, notifMessage);
       return { ok: true };
+    }
 
     case "SAVE_PENDING_INVITE":
       await savePendingInviteStorage(message.payload as PendingInvite);
@@ -316,129 +189,50 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
     case "GET_SETTINGS":
       return await getSettings();
 
-    case "SET_TRACKING":
+    case "SET_TRACKING": {
       const enabled = (message.payload as { enabled: boolean }).enabled;
       return await setSettings({ trackingEnabled: enabled });
-
-    case "SET_SHEET_CONFIG":
-      const config = message.payload as Partial<AppSettings>;
-      if (config.spreadsheetId) {
-        config.spreadsheetId = extractSpreadsheetId(config.spreadsheetId);
-      }
-      return await setSettings(config);
-
-    case "GOOGLE_CONNECT":
-      const connectPayload = message.payload as {
-        spreadsheetId: string;
-        sheetTabName?: string;
-      };
-      const spreadsheetId = extractSpreadsheetId(connectPayload.spreadsheetId);
-      const requestedTab = connectPayload.sheetTabName ?? "Sheet1";
-      const token = await getGoogleAuthToken(true, { forceConsent: true });
-      const sheetInfo = await testSheetAccess(token, spreadsheetId, requestedTab);
-      await setSettings({
-        spreadsheetId,
-        sheetTabName: sheetInfo.tabName,
-        sheetsSyncEnabled: true,
-        googleConnected: true,
-      });
-      // Sync bidirectionnelle initiale
-      const connectSync = await syncSheetBidirectional(false);
-      return {
-        ok: true,
-        title: sheetInfo.title,
-        tabName: sheetInfo.tabName,
-        synced: connectSync.pushed,
-        imported: connectSync.imported,
-        updated: connectSync.updated,
-        sheetCount: connectSync.sheetCount,
-      };
-
-    case "GOOGLE_DISCONNECT":
-      await revokeGoogleAuthToken();
-      return await setSettings({
-        sheetsSyncEnabled: false,
-        googleConnected: false,
-      });
-
-    case "PULL_SHEET_SYNC": {
-      const pullPayload = (message.payload as {
-        mode?: "full" | "pull";
-        interactive?: boolean;
-      } | null) ?? {};
-      const mode = pullPayload.mode ?? "full";
-      const interactive = pullPayload.interactive ?? mode === "full";
-      if (mode === "pull") {
-        return await pullAndMergeFromSheet(true, interactive);
-      }
-      return await syncSheetBidirectional(interactive);
     }
 
-    case "PUSH_SHEET_SYNC":
-      const pushed = await pushAllProspectsToSheet(true);
-      return { ok: true, synced: pushed };
+    case "SET_SHEET_CONFIG": {
+      const config = message.payload as Partial<AppSettings>;
+      return await setSettings(config);
+    }
 
     case "GET_PROSPECTS":
       return await getProspects();
 
-    case "CHECK_PROSPECT_EXISTS":
+    case "CHECK_PROSPECT_EXISTS": {
       const checkUrl = (message.payload as { profileUrl: string }).profileUrl;
-      let found = await findProspectByProfileUrl(checkUrl);
-      if (!found) {
-        // Si connecté au sheet, re-synchronise (cooldown 60s) pour détecter les déjà contactés
-        const settings = await getSettings();
-        if (
-          settings.googleConnected &&
-          settings.spreadsheetId &&
-          (await hasCachedGoogleToken())
-        ) {
-          try {
-            await pullAndMergeFromSheet(false);
-            found = await findProspectByProfileUrl(checkUrl);
-          } catch (err) {
-            console.warn("[LK Tracker] Pull sheet on check:", err);
-          }
-        }
-      }
+      const found = await findProspectByProfileUrl(checkUrl);
       return { exists: !!found, prospect: found };
+    }
 
     case "OPEN_PANEL_WINDOW":
       await openPanelWindow();
       return { ok: true };
 
-    case "OPEN_SIDE_PANEL":
+    case "OPEN_SIDE_PANEL": {
       const [sideTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
       if (!sideTab) return { ok: false };
       const opened = await openSidePanel(sideTab);
       if (!opened) await openPanelWindow();
       return { ok: opened };
+    }
 
-    case "ADD_PROSPECT":
+    case "ADD_PROSPECT": {
       const added = await addProspect(message.payload as Prospect);
-      await syncProspectToSheet(added).catch((err) =>
-        console.error("[LK Tracker] Sync sheet:", err)
-      );
       return added;
+    }
 
     case "DELETE_PROSPECT": {
       const { id } = message.payload as { id: string };
       const removed = await deleteProspect(id);
       if (!removed) return { ok: false };
-
-      let sheetSync: "skipped" | "deleted" | "not_found" | "error" = "skipped";
-      let sheetError: string | undefined;
-      try {
-        sheetSync = await syncProspectDeletionFromSheet(removed.profileUrl);
-      } catch (err) {
-        sheetSync = "error";
-        sheetError = err instanceof Error ? err.message : String(err);
-        console.error("[LK Tracker] Delete sheet:", err);
-      }
-
-      return { ok: true, sheetSync, sheetError };
+      return { ok: true };
     }
 
-    case "UPDATE_PROSPECT":
+    case "UPDATE_PROSPECT": {
       const { id, profileUrl, patch } = message.payload as {
         id?: string;
         profileUrl?: string;
@@ -450,43 +244,26 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
         if (found) prospectId = found.id;
       }
       if (!prospectId) return null;
-      const updated = await updateProspect(prospectId, patch);
-      if (updated) {
-        await syncProspectToSheet(updated).catch((err) =>
-          console.error("[LK Tracker] Sync sheet:", err)
-        );
-      }
-      return updated;
+      return await updateProspect(prospectId, patch);
+    }
 
-    case "EXPORT_EXCEL":
+    case "EXPORT_EXCEL": {
       const prospects = await getProspects();
       await downloadExcel(prospects);
       return { ok: true, count: prospects.length };
+    }
 
-    case "RECORD_MESSAGE":
+    case "RECORD_MESSAGE": {
       const recordUrl = (message.payload as { profileUrl: string }).profileUrl;
-      const recorded = await recordMessage(recordUrl);
-      if (recorded) {
-        await syncProspectToSheet(recorded).catch((err) =>
-          console.error("[LK Tracker] Sync sheet:", err)
-        );
-      }
-      return recorded;
+      return await recordMessage(recordUrl);
+    }
 
     case "SYNC_MESSAGES": {
       const messageThreads = message.payload as Array<{ name: string; profileUrl: string }>;
       let messagesUpdated = 0;
       for (const thread of messageThreads) {
         const recordedMsg = await recordMessage(thread.profileUrl);
-        if (recordedMsg) {
-          messagesUpdated++;
-        }
-      }
-      // Un seul push sheet à la fin — évite N popups OAuth
-      if (messagesUpdated > 0) {
-        await pushAllProspectsToSheet(false).catch((err) =>
-          console.error("[LK Tracker] Sync sheet messages:", err)
-        );
+        if (recordedMsg) messagesUpdated++;
       }
       return { updated: messagesUpdated };
     }
@@ -572,7 +349,6 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
               patch.jobTitleCandidates = [];
             }
           } else {
-            // Ambigu ou non sûr → choix sur la card (même 1 candidat)
             const sameAsExisting =
               existing.jobTitleCandidates &&
               existing.jobTitleCandidates.length === incomingCandidates.length &&
@@ -618,16 +394,19 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
         if ((patch.jobTitleCandidates?.length ?? 0) >= 1) titlesPending++;
       }
 
-      const touched = statusUpdated + metaUpdated + titlesPending;
-      if (touched > 0) {
-        await pushAllProspectsToSheet(false).catch((err) =>
-          console.error("[LK Tracker] Sync sheet connexions:", err)
-        );
-      }
-      return { updated: statusUpdated, metaUpdated, titlesPending, touched };
+      return { updated: statusUpdated, metaUpdated, titlesPending };
     }
+
+    // Ces cases existaient pour Google Sheets — gardées vides pour ne pas casser les appels legacy
+    case "GOOGLE_CONNECT":
+    case "GOOGLE_DISCONNECT":
+    case "PULL_SHEET_SYNC":
+    case "PUSH_SHEET_SYNC":
+      return { ok: false, reason: "Google Sheets désactivé — données migrées vers Supabase" };
   }
 }
+
+// ─── Fonctions exportées (utilisées par content scripts) ─────────────────────
 
 export async function recordInvitation(profileData: {
   name: string;

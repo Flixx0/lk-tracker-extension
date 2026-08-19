@@ -71,9 +71,6 @@
         <button type="button" id="sync-messages" class="btn btn-secondary">
           Sync messages
         </button>
-        <button type="button" id="sync-sheet" class="btn btn-secondary">
-          Sync sheet
-        </button>
         <button type="button" id="export-excel" class="btn btn-primary">
           Export Excel
         </button>
@@ -98,32 +95,7 @@
       </section>
 
       <details class="popup-settings">
-        <summary>Paramètres & Google Sheet</summary>
-        <section class="sheets">
-          <h2>Google Sheet</h2>
-          <label for="spreadsheet-id">URL ou ID du sheet</label>
-          <input type="text" id="spreadsheet-id" placeholder="https://docs.google.com/spreadsheets/d/..." />
-
-          <label for="sheet-tab-name">Nom de l'onglet</label>
-          <input type="text" id="sheet-tab-name" value="Feuille 1" placeholder="Feuille 1 ou Sheet1" />
-
-          <div class="sheets-actions">
-            <button type="button" id="google-connect" class="btn btn-primary">Connecter Google</button>
-            <button type="button" id="google-disconnect" class="btn btn-secondary" hidden>
-              Déconnecter
-            </button>
-          </div>
-          <p id="sheets-status" class="sheets-status">Non connecté</p>
-          <p id="extension-id-hint" class="extension-id-hint">
-            ID extension (OAuth Chrome Extension — Google Chrome) :
-            <code id="extension-id"></code>
-          </p>
-          <p id="oauth-redirect-hint" class="extension-id-hint">
-            URI de redirection (OAuth Web application — Arc/Brave) :
-            <code id="oauth-redirect-uri"></code>
-          </p>
-        </section>
-
+        <summary>Paramètres</summary>
         <section class="settings">
           <label for="follow-up-days">Relance après (jours)</label>
           <input type="number" id="follow-up-days" min="1" max="30" value="3" />
