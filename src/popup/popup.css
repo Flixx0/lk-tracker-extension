@@ -421,6 +421,12 @@ body.window-mode .prospect-list-scroll {
   color: #0a66c2;
 }
 
+.btn-mark-message:hover {
+  background: #e7f6ec;
+  border-color: #b7dfc4;
+  color: #137333;
+}
+
 .btn-delete-prospect:hover {
   background: #fde8e8;
   border-color: #f0b8b8;

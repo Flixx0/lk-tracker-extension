@@ -161,9 +161,10 @@ async function syncMessages(): Promise<void> {
       prospects.map((p) => normalizePersonName(p.name))
     );
 
-    // Collecte : scroll + match noms + ouverture threads non matchés
+    // Collecte : scroll + match noms + ouverture threads non matchés (rythme humain)
     const fromDom = await collectMessagingParticipantsForSync({
-      maxThreadOpens: 40,
+      maxThreadOpens: 12,
+      maxScrolls: 14,
       shouldOpenThread: (name) => !prospectNameSet.has(normalizePersonName(name)),
     });
     console.log(`[LK Tracker] ${fromDom.length} profils via DOM/threads`);

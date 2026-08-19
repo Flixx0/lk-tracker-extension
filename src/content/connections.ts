@@ -34,7 +34,7 @@ async function syncConnections(): Promise<void> {
     const targetUrls = prospects.map((p) => p.profileUrl).filter(Boolean);
 
     const connections = await collectConnectionsFromPage({
-      maxScrolls: 12,
+      maxScrolls: 10,
       targetUrls,
     });
     const withTitle = connections.filter((c) => c.jobTitle).length;

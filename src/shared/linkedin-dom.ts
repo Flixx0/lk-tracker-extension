@@ -1225,6 +1225,36 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Délai aléatoire type humain (évite les patterns réguliers → 429 LinkedIn). */
+export async function humanDelay(minMs: number, maxMs: number): Promise<void> {
+  const lo = Math.min(minMs, maxMs);
+  const hi = Math.max(minMs, maxMs);
+  const ms = Math.floor(lo + Math.random() * (hi - lo + 1));
+  await sleep(ms);
+}
+
+/**
+ * Pause “humaine” avec parfois un temps plus long (hésitation).
+ * everyN : 1 pause longue tous les N appels en moyenne.
+ */
+export async function humanPause(
+  kind: "scroll" | "click" | "read" | "betweenBatches" = "scroll"
+): Promise<void> {
+  const ranges: Record<typeof kind, [number, number]> = {
+    scroll: [1200, 2800],
+    click: [1800, 4200],
+    read: [2200, 5000],
+    betweenBatches: [4000, 9000],
+  };
+  const [min, max] = ranges[kind];
+  await humanDelay(min, max);
+
+  // ~20% du temps : petite pause supplémentaire
+  if (Math.random() < 0.2) {
+    await humanDelay(800, 2500);
+  }
+}
+
 export async function scrollToBottom(intervalMs = 800, maxScrolls = 50): Promise<void> {
   let scrollCount = 0;
   let lastHeight = 0;
@@ -1544,6 +1574,7 @@ export async function collectConnectionsFromPage(
   for (let i = 0; i < maxScrolls; i++) {
     // Préférer "Afficher plus" (moins brutal qu'un scroll infini)
     const loadedMore = clickConnectionsLoadMore();
+    if (loadedMore) await humanDelay(900, 2200);
 
     const preferred =
       document.querySelector<HTMLElement>(".scaffold-finite-scroll__content") ??
@@ -1556,8 +1587,9 @@ export async function collectConnectionsFromPage(
       findNearestScrollable(document.body) ||
       document.documentElement;
 
-    // Scroll progressif (~1 viewport), pas un jump en bas à chaque tour
-    const step = Math.max(Math.floor(scrollRoot.clientHeight * 0.85), 400);
+    // Scroll progressif (~0.55–0.9 viewport), pas un jump en bas à chaque tour
+    const factor = 0.55 + Math.random() * 0.35;
+    const step = Math.max(Math.floor(scrollRoot.clientHeight * factor), 280);
     if (scrollRoot === document.documentElement || scrollRoot === document.body) {
       window.scrollBy(0, step);
     } else {
@@ -1565,7 +1597,9 @@ export async function collectConnectionsFromPage(
       scrollRoot.dispatchEvent(new Event("scroll", { bubbles: true }));
     }
 
-    await sleep(loadedMore ? 700 : 500);
+    await humanPause("scroll");
+    // Parfois une micro-pause avant de relire le DOM
+    if (Math.random() < 0.3) await humanDelay(400, 1200);
     harvest();
 
     if (allTargetsFound()) break;
@@ -1576,6 +1610,8 @@ export async function collectConnectionsFromPage(
     } else {
       stableRounds = 0;
       lastCount = byUrl.size;
+      // Toutes les ~4 nouvelles vagues, pause plus longue
+      if (i > 0 && i % 4 === 0) await humanPause("betweenBatches");
     }
   }
 
@@ -2023,63 +2059,61 @@ export async function waitForMessagingList(timeoutMs = 15000): Promise<boolean> 
 }
 
 /** Scroll la liste de messages jusqu'à stabilisation */
-export async function scrollMessagingList(maxScrolls = 40): Promise<void> {
+export async function scrollMessagingList(maxScrolls = 14): Promise<void> {
   let lastCount = 0;
   let stableRounds = 0;
 
   for (let i = 0; i < maxScrolls; i++) {
-    // Recalculer à chaque tour : LinkedIn remplace parfois le conteneur
     const scrollRoot = findMessagingListScrollRoot();
     const items = getMessagingConversationElements();
     const lastItem = items[items.length - 1];
 
     if (lastItem) {
       try {
-        lastItem.scrollIntoView({ block: "end", inline: "nearest" });
+        lastItem.scrollIntoView({ block: "nearest", inline: "nearest" });
       } catch {
         /* ignore */
       }
     }
 
+    const factor = 0.5 + Math.random() * 0.4;
+    const step = Math.max(Math.floor(scrollRoot.clientHeight * factor), 240);
+
     if (scrollRoot === document.documentElement || scrollRoot === document.body) {
-      window.scrollTo(0, document.body.scrollHeight);
+      window.scrollBy(0, step);
     } else {
-      const before = scrollRoot.scrollTop;
-      scrollRoot.scrollTop = scrollRoot.scrollHeight;
-      if (scrollRoot.scrollTop === before) {
-        scrollRoot.scrollBy({
-          top: Math.max(scrollRoot.clientHeight * 0.9, 320),
-          behavior: "instant" as ScrollBehavior,
-        });
-      }
+      scrollRoot.scrollBy({ top: step, behavior: "instant" as ScrollBehavior });
       scrollRoot.dispatchEvent(new Event("scroll", { bubbles: true }));
     }
 
-    // Scroll aussi via le page bridge (monde MAIN) — critique sur Arc
-    requestPageBridgeScroll(scrollRoot);
-
-    // Wheel artificiel pour les listes virtualisées
-    try {
-      scrollRoot.dispatchEvent(
-        new WheelEvent("wheel", {
-          bubbles: true,
-          cancelable: true,
-          deltaY: Math.max(scrollRoot.clientHeight * 0.8, 400),
-        })
-      );
-    } catch {
-      /* ignore */
+    if (Math.random() < 0.5) {
+      requestPageBridgeScroll(scrollRoot);
     }
 
-    await sleep(850);
+    if (Math.random() < 0.4) {
+      try {
+        scrollRoot.dispatchEvent(
+          new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            deltaY: step,
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+
+    await humanPause("scroll");
 
     const currentCount = countMessagingConversationItems();
     if (currentCount <= lastCount) {
       stableRounds++;
-      if (stableRounds >= 4) break;
+      if (stableRounds >= 3) break;
     } else {
       stableRounds = 0;
       lastCount = currentCount;
+      if (i > 0 && i % 3 === 0) await humanPause("betweenBatches");
     }
   }
 }
@@ -2207,24 +2241,27 @@ export async function extractProfileFromOpenThread(): Promise<{
 
 export interface CollectMessagingOptions {
   maxThreadOpens?: number;
+  maxScrolls?: number;
   /** Si false, n'ouvre pas le thread (ex. déjà matché par nom). Défaut: ouvrir. */
   shouldOpenThread?: (name: string) => boolean;
 }
 
 /**
  * Collecte les participants : match liste + ouverture des threads sans /in/.
- * maxThreadOpens limite le nombre de clics (perf).
+ * maxThreadOpens limite le nombre de clics (anti-429).
  */
 export async function collectMessagingParticipantsForSync(
   options: CollectMessagingOptions | number = {}
 ): Promise<Array<{ name: string; profileUrl: string }>> {
   const opts: CollectMessagingOptions =
     typeof options === "number" ? { maxThreadOpens: options } : options;
-  const maxThreadOpens = opts.maxThreadOpens ?? 60;
+  const maxThreadOpens = opts.maxThreadOpens ?? 12;
+  const maxScrolls = opts.maxScrolls ?? 14;
   const shouldOpenThread = opts.shouldOpenThread ?? (() => true);
 
   await waitForMessagingList();
-  await scrollMessagingList();
+  await humanDelay(800, 2000);
+  await scrollMessagingList(maxScrolls);
 
   const entries = parseMessagingConversationsFromPage();
   console.log(`[LK Tracker] ${entries.length} entrées conversation parsées`);
@@ -2242,7 +2279,7 @@ export async function collectMessagingParticipantsForSync(
     if (entry.profileUrl) add(entry.name, entry.profileUrl);
   }
 
-  // Ouvrir les threads sans lien profil pour récupérer /in/
+  // Ouvrir les threads sans lien profil pour récupérer /in/ — rythme humain
   let opened = 0;
   for (const entry of entries) {
     if (entry.profileUrl) continue;
@@ -2251,14 +2288,19 @@ export async function collectMessagingParticipantsForSync(
     if (!entry.element) continue;
 
     try {
+      await humanPause("click");
       clickConversationCard(entry.element);
       opened++;
-      await sleep(900);
+      await humanPause("read");
 
       const extracted = await extractProfileFromOpenThread();
       if (extracted) add(extracted.name || entry.name, extracted.profileUrl);
+
+      // Toutes les 3–4 ouvertures : pause plus longue
+      if (opened % 3 === 0) await humanPause("betweenBatches");
     } catch (err) {
       console.warn("[LK Tracker] Ouverture thread échouée:", err);
+      await humanDelay(2000, 5000);
     }
   }
 

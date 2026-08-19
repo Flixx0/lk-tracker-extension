@@ -252,7 +252,7 @@ function sortProspectsByDate(prospects: Prospect[]): Prospect[] {
 
 function createProspectActions(
   prospect: Prospect,
-  options: { showCopyLink?: boolean } = {}
+  options: { showCopyLink?: boolean; showMarkMessage?: boolean } = {}
 ): HTMLElement {
   const actions = document.createElement("div");
   actions.className = "prospect-actions";
@@ -277,13 +277,56 @@ function createProspectActions(
     actions.appendChild(copyBtn);
   }
 
+  if (options.showMarkMessage) {
+    const msgBtn = document.createElement("button");
+    msgBtn.type = "button";
+    msgBtn.className = "btn-prospect-action btn-mark-message";
+    msgBtn.title = "Marquer comme message envoyé";
+    msgBtn.setAttribute("aria-label", `Message envoyé à ${prospect.name}`);
+    msgBtn.textContent = "✉";
+    msgBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      msgBtn.disabled = true;
+      try {
+        const settings = await sendMessage<AppSettings>({ type: "GET_SETTINGS" });
+        const now = new Date();
+        const followUp = new Date(now);
+        followUp.setDate(followUp.getDate() + (settings.followUpDays || 3));
+
+        const updated = await sendMessage<Prospect | null>({
+          type: "UPDATE_PROSPECT",
+          payload: {
+            id: prospect.id,
+            patch: {
+              status: PROSPECT_STATUSES.MESSAGE_SENT,
+              messageSentAt: now.toISOString(),
+              followUpDate: followUp.toISOString(),
+            },
+          },
+        });
+        if (!updated) {
+          showStatus("Prospect introuvable", true);
+          msgBtn.disabled = false;
+          return;
+        }
+        showStatus(`${prospect.name} → Message envoyé`);
+        await loadProspects();
+      } catch (err) {
+        showStatus(`Erreur : ${err instanceof Error ? err.message : String(err)}`, true);
+        msgBtn.disabled = false;
+      }
+    });
+    actions.appendChild(msgBtn);
+  }
+
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "btn-prospect-action btn-delete-prospect";
   deleteBtn.title = "Supprimer le prospect";
   deleteBtn.setAttribute("aria-label", `Supprimer ${prospect.name}`);
   deleteBtn.textContent = "✕";
-    deleteBtn.addEventListener("click", async (e) => {
+  deleteBtn.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (!confirm(`Supprimer ${prospect.name} de la liste ?`)) return;
@@ -379,7 +422,7 @@ function appendTitleChoices(body: HTMLElement, prospect: Prospect): void {
 
 function createProspectListItem(
   prospect: Prospect,
-  options: { showCopyLink?: boolean } = {}
+  options: { showCopyLink?: boolean; showMarkMessage?: boolean } = {}
 ): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "prospect-item";
@@ -418,7 +461,7 @@ function createProspectListItem(
 function renderProspectList(
   container: HTMLElement,
   prospects: Prospect[],
-  options: { showCopyLink?: boolean; limit?: number } = {}
+  options: { showCopyLink?: boolean; showMarkMessage?: boolean; limit?: number } = {}
 ): void {
   container.innerHTML = "";
   const items = options.limit ? prospects.slice(0, options.limit) : prospects;
@@ -436,7 +479,7 @@ function renderProspects(prospects: Prospect[]): void {
 
   toContactCount.textContent = String(toContact.length);
   toContactEmpty.hidden = toContact.length > 0;
-  renderProspectList(toContactList, toContact, { showCopyLink: true });
+  renderProspectList(toContactList, toContact, { showCopyLink: true, showMarkMessage: true });
   renderProspectList(prospectList, sorted, { limit: 50 });
 
   if (currentDetectedProfile) {
